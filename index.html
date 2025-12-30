@@ -1,0 +1,1354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RailPlanner Pro | OO Gauge Blueprint</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Config & Styles -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        blueprint: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                            950: '#082f49',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { 
+            background-color: #112845; /* Blueprint Dark Blue */
+            color: #e0f2fe;
+            overflow: hidden;
+            touch-action: none;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0c4a6e; }
+        ::-webkit-scrollbar-thumb { background: #38bdf8; border-radius: 3px; }
+        
+        /* Glassmorphism Utilities */
+        .glass {
+            background: rgba(17, 40, 69, 0.85);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .canvas-grid {
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.15) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.15) 1px, transparent 1px),
+                linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+            background-position: center center;
+        }
+
+        /* SVG Styles */
+        .layout-boundary {
+            fill: rgba(15, 23, 42, 0.3);
+            stroke: #38bdf8;
+            stroke-width: 2px;
+            stroke-dasharray: 10 10;
+            pointer-events: none;
+        }
+
+        .layout-label {
+            fill: #38bdf8;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            opacity: 0.7;
+        }
+
+        /* Collision Error State */
+        .track-group.collision .track-rail { stroke: #ef4444 !important; }
+        .track-group.collision .track-sleeper { stroke: rgba(239, 68, 68, 0.3) !important; }
+        
+        .snap-indicator {
+            fill: none;
+            stroke: #4ade80;
+            stroke-width: 2px;
+            stroke-dasharray: 2 2;
+            opacity: 0.8;
+            pointer-events: none;
+        }
+
+        /* Print Styles */
+        @media print {
+            body { 
+                background-color: white !important; 
+                color: black !important; 
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            header, aside, .zoom-controls, #toast, #sim-legend, #rotate-tip { display: none !important; }
+            
+            #canvas-container { 
+                background-color: white !important; 
+                background-image: none !important; 
+                position: absolute;
+                top: 0; left: 0; width: 100%; height: 100%;
+                z-index: 9999;
+            }
+            .layout-boundary { stroke: #000; fill: none; stroke-dasharray: 5 5; stroke-width: 1px; }
+            .layout-label { fill: #000; }
+            .snap-indicator { display: none; }
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col relative text-sm select-none font-sans">
+
+    <!-- 1. HEADER / TOOLBAR -->
+    <header class="h-14 glass flex items-center justify-between px-4 z-50 shrink-0 border-b-0">
+        <div class="flex items-center gap-3">
+            <div class="bg-sky-600 p-1.5 rounded-sm">
+                <i data-lucide="ruler" class="w-5 h-5 text-white"></i>
+            </div>
+            <div class="flex flex-col justify-center">
+                <h1 class="font-bold text-lg tracking-tight leading-none hidden sm:block">RailPlanner <span class="text-sky-400 font-light">CAD</span></h1>
+                <span class="text-[10px] text-sky-300/70 font-mono tracking-wider hidden sm:block">OO GAUGE [1:76]</span>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2 bg-slate-900/30 p-1 rounded-md border border-white/10">
+            <button onclick="app.setTool('select')" id="tool-select" class="p-2 rounded hover:bg-white/10 text-sky-400 bg-white/10 transition"><i data-lucide="mouse-pointer-2" class="w-4 h-4"></i></button>
+            <button onclick="app.setTool('pan')" id="tool-pan" class="p-2 rounded hover:bg-white/10 text-slate-400 transition"><i data-lucide="move" class="w-4 h-4"></i></button>
+            <div class="w-px h-4 bg-white/10 mx-1"></div>
+            <button onclick="app.undo()" class="p-2 rounded hover:bg-white/10 text-slate-400 transition" title="Undo (Ctrl+Z)"><i data-lucide="undo-2" class="w-4 h-4"></i></button>
+            <button onclick="app.redo()" class="p-2 rounded hover:bg-white/10 text-slate-400 transition" title="Redo (Ctrl+Y)"><i data-lucide="redo-2" class="w-4 h-4"></i></button>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <button onclick="app.toggleSimulation()" id="btn-sim" class="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-white/10 text-slate-400 border border-transparent hover:border-white/10 transition">
+                <i data-lucide="zap" class="w-4 h-4"></i> <span class="hidden sm:inline">Simulate</span>
+            </button>
+            <button onclick="app.printLayout()" class="p-2 rounded hover:bg-white/10 text-slate-400" title="Print Layout"><i data-lucide="printer" class="w-4 h-4"></i></button>
+            <div class="h-6 w-px bg-white/10 mx-1"></div>
+            <button onclick="app.exportLayout()" class="p-2 rounded hover:bg-white/10 text-slate-400"><i data-lucide="download" class="w-4 h-4"></i></button>
+            <input type="file" id="import-file" class="hidden" accept=".json" onchange="app.importLayout(this)">
+            <button onclick="document.getElementById('import-file').click()" class="p-2 rounded hover:bg-white/10 text-slate-400"><i data-lucide="upload" class="w-4 h-4"></i></button>
+        </div>
+    </header>
+
+    <!-- 2. MAIN WORKSPACE -->
+    <main class="flex-1 relative overflow-hidden flex">
+        
+        <!-- LEFT SIDEBAR: Library & Settings -->
+        <aside class="absolute bottom-0 left-0 right-0 h-1/3 sm:static sm:h-full sm:w-72 glass border-r-0 sm:border-r z-40 flex flex-col transition-transform duration-300 transform translate-y-0">
+            <!-- Tabs -->
+            <div class="flex border-b border-white/10 bg-black/20">
+                <button class="flex-1 py-3 text-xs font-bold text-sky-400 border-b-2 border-sky-400 uppercase tracking-widest">Library</button>
+                <div class="w-px bg-white/10 my-2"></div>
+                <div class="flex-1 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest text-center">Settings</div>
+            </div>
+            
+            <!-- Board Settings -->
+            <div class="p-3 bg-slate-900/30 border-b border-white/5 space-y-2">
+                <div class="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Layout Size</div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="text-[10px] text-sky-300/70 block mb-0.5">Width (mm)</label>
+                        <input type="number" id="board-w" value="2440" onchange="app.updateBoardSize()" class="w-full bg-slate-800 border border-white/10 rounded px-2 py-1 text-xs text-white focus:border-sky-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-sky-300/70 block mb-0.5">Depth (mm)</label>
+                        <input type="number" id="board-h" value="1220" onchange="app.updateBoardSize()" class="w-full bg-slate-800 border border-white/10 rounded px-2 py-1 text-xs text-white focus:border-sky-500 outline-none">
+                    </div>
+                </div>
+                <div class="text-[10px] text-slate-500 text-right italic">Default: 8ft x 4ft</div>
+            </div>
+
+            <!-- Library Grid -->
+            <div class="p-4 overflow-y-auto flex-1 grid grid-cols-3 sm:grid-cols-2 gap-3 content-start" id="library-grid">
+                <!-- Generated by JS -->
+            </div>
+            
+            <!-- Mobile Grab Handle -->
+            <div class="sm:hidden h-1 w-12 bg-slate-600 rounded-full mx-auto my-2 opacity-50"></div>
+        </aside>
+
+        <!-- CENTER: Canvas -->
+        <div id="canvas-container" class="flex-1 relative bg-[#112845] canvas-grid cursor-default overflow-hidden">
+            <!-- CANVAS LAYER (Tracks, Rails, Sleepers) -->
+            <canvas id="main-canvas" class="absolute inset-0 w-full h-full z-10"></canvas>
+            
+            <!-- SVG LAYER (UI Overlays, Snap Indicators) -->
+            <svg id="main-svg" class="absolute inset-0 w-full h-full z-20 pointer-events-none" preserveAspectRatio="xMidYMid slice">
+                <defs>
+                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="#38bdf8" />
+                    </marker>
+                     <marker id="arrowtail" markerWidth="10" markerHeight="7" refX="1" refY="3.5" orient="auto">
+                        <polygon points="10 0, 0 3.5, 10 7" fill="#38bdf8" />
+                    </marker>
+                </defs>
+                <g id="viewport">
+                    <g id="grid-layer"></g> <!-- Board boundary -->
+                    <g id="overlay-layer"></g> <!-- Snap indicators -->
+                </g>
+            </svg>
+            
+            <!-- Scale Info / Zoom -->
+            <div class="absolute bottom-6 right-6 flex flex-col items-end gap-4 pointer-events-auto z-30 zoom-controls">
+                <div class="glass px-3 py-1 rounded text-xs font-mono text-sky-300">
+                    <span id="zoom-level">100%</span>
+                </div>
+
+                <div class="flex flex-col gap-2">
+                    <button onclick="app.fitView()" class="p-3 bg-slate-800/90 rounded-full shadow-lg border border-white/20 hover:bg-slate-700 text-white" title="Fit to Screen"><i data-lucide="maximize" class="w-5 h-5"></i></button>
+                    <div class="h-px bg-white/10 w-full my-1"></div>
+                    <button onclick="app.zoomIn()" class="p-3 bg-slate-800/90 rounded-full shadow-lg border border-white/20 hover:bg-slate-700 text-white"><i data-lucide="plus" class="w-5 h-5"></i></button>
+                    <button onclick="app.resetView()" class="p-3 bg-slate-800/90 rounded-full shadow-lg border border-white/20 hover:bg-slate-700 text-white" title="Reset Zoom"><i data-lucide="scan" class="w-5 h-5"></i></button>
+                    <button onclick="app.zoomOut()" class="p-3 bg-slate-800/90 rounded-full shadow-lg border border-white/20 hover:bg-slate-700 text-white"><i data-lucide="minus" class="w-5 h-5"></i></button>
+                </div>
+            </div>
+            
+            <!-- Rotate Tip Overlay -->
+            <div id="rotate-tip" class="absolute top-6 left-1/2 -translate-x-1/2 glass px-3 py-1 rounded-full text-xs text-sky-200 opacity-0 transition-opacity pointer-events-none z-30">
+                Press <span class="font-bold text-white bg-white/20 px-1 rounded">R</span> to Rotate
+            </div>
+        </div>
+
+        <!-- RIGHT SIDEBAR: Inspector -->
+        <aside id="inspector-panel" class="absolute top-4 right-4 w-64 glass rounded-sm shadow-2xl border border-white/10 p-0 transform translate-x-[120%] transition-transform duration-300 z-50 overflow-hidden">
+            <div class="flex justify-between items-center p-3 bg-black/20 border-b border-white/10">
+                <h3 class="font-bold text-sky-400 text-xs uppercase tracking-wider">Inspector</h3>
+                <button onclick="app.deselectAll()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
+            </div>
+            
+            <div class="p-4">
+                <div id="inspector-content" class="space-y-4"></div>
+
+                <div id="inspector-multi" class="hidden">
+                    <div class="text-xs text-slate-400 uppercase tracking-widest mb-2">Selection</div>
+                    <div class="bg-slate-900/50 p-3 rounded border border-white/10 mb-4">
+                        <div class="flex justify-between items-baseline mb-1">
+                            <span class="text-xs text-slate-400">Total Track Length</span>
+                            <span class="text-lg font-mono text-sky-400" id="multi-length-mm">0mm</span>
+                        </div>
+                        <div class="flex justify-between items-baseline mb-3">
+                             <span class="text-[10px] text-slate-500">Real Scale (1:76)</span>
+                             <span class="text-xs font-mono text-slate-500" id="multi-length-m">0.0m</span>
+                        </div>
+                        <div class="pt-3 border-t border-white/5">
+                            <div class="text-[10px] text-slate-500 uppercase font-bold mb-1">Occupied Area (Bounds)</div>
+                            <div class="flex justify-between items-center bg-black/20 p-2 rounded">
+                                <span class="text-xs font-mono text-white" id="multi-bounds">0 x 0 mm</span>
+                                <i data-lucide="box-select" class="w-3 h-3 text-slate-500"></i>
+                            </div>
+                        </div>
+                         <div class="flex justify-between items-baseline mt-2 pt-2 border-t border-white/5">
+                             <span class="text-[10px] text-slate-500">Item Count</span>
+                             <span class="text-xs font-mono text-white" id="multi-count">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="p-3 bg-black/20 border-t border-white/10 flex gap-2">
+                <button onclick="app.rotateSelection(45)" class="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-sm border border-white/10 text-xs font-medium text-sky-100 transition">Rotate 45°</button>
+                <button onclick="app.deleteSelection()" class="flex-1 py-2 bg-red-900/30 hover:bg-red-900/50 text-red-300 rounded-sm border border-red-900/30 text-xs font-medium transition">Delete</button>
+            </div>
+        </aside>
+
+        <!-- Simulation Legend -->
+        <div id="sim-legend" class="absolute top-4 left-4 sm:left-auto sm:right-[300px] glass px-4 py-2 rounded border border-white/10 hidden z-30">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Voltage Drop</div>
+            <div class="flex items-center gap-4 text-xs font-mono">
+                <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)]"></span> 12V</div>
+                <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-yellow-400"></span> 9V</div>
+                <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-400"></span> &lt;6V</div>
+            </div>
+        </div>
+    </main>
+    
+    <!-- Modal for Messages -->
+    <div id="toast" class="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-sky-600 text-white px-6 py-2 rounded-sm shadow-lg border border-white/20 translate-y-20 opacity-0 transition-all z-[100] font-medium text-sm">
+        Action Completed
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // --- DATA MODELS ---
+
+        const TRACK_LIBRARY = {
+            'R600': { id: 'R600', name: 'Straight', type: 'straight', length: 168, thumb: 'M 0 25 L 50 25' },
+            'R601': { id: 'R601', name: 'Double Straight', type: 'straight', length: 335, thumb: 'M 0 25 L 50 25' },
+            'R603': { id: 'R603', name: 'Long Straight', type: 'straight', length: 670, thumb: 'M 0 25 L 50 25' },
+            'R605': { id: 'R605', name: 'Curve R1', type: 'curve', radius: 371, angle: 45, thumb: 'M 0 50 Q 25 50 40 20' },
+            'R607': { id: 'R607', name: 'Curve R2', type: 'curve', radius: 438, angle: 45, thumb: 'M 0 50 Q 25 50 45 15' },
+            'R609': { id: 'R609', name: 'Curve R3', type: 'curve', radius: 505, angle: 45, thumb: 'M 0 50 Q 25 50 50 10' },
+            'R8072': { id: 'R8072', name: 'Point Left', type: 'turnout', length: 168, radius: 438, angle: -22.5, direction: 'left', thumb: 'M 50 25 L 0 25 M 25 25 L 5 40' },
+            'R8073': { id: 'R8073', name: 'Point Right', type: 'turnout', length: 168, radius: 438, angle: 22.5, direction: 'right', thumb: 'M 0 25 L 50 25 M 25 25 L 45 40' },
+            'R083': { id: 'R083', name: 'Buffer Stop', type: 'buffer', length: 60, thumb: 'M 0 25 L 40 25 M 40 15 L 40 35' }
+        };
+
+        const TRAINS = {
+            'shunter': { name: '0-4-0 Shunter', minRadius: 0 },
+            'standard': { name: 'Standard Diesel', minRadius: 380 }, 
+            'pacific': { name: 'Pacific 4-6-2', minRadius: 450 }, 
+        };
+
+        // --- CORE MATH ENGINE ---
+
+        const MathUtils = {
+            degToRad: (deg) => deg * (Math.PI / 180),
+            radToDeg: (rad) => rad * (180 / Math.PI),
+            
+            rotatePoint: (x, y, angleDeg) => {
+                const rad = MathUtils.degToRad(angleDeg);
+                const cos = Math.cos(rad);
+                const sin = Math.sin(rad);
+                return {
+                    x: x * cos - y * sin,
+                    y: x * sin + y * cos
+                };
+            },
+
+            transformLocalToWorld: (localX, localY, trackX, trackY, rotation) => {
+                const rot = MathUtils.rotatePoint(localX, localY, rotation);
+                return {
+                    x: trackX + rot.x,
+                    y: trackY + rot.y
+                };
+            },
+
+            getConnectorWorldPos: (track, connectorIndex) => {
+                const def = TRACK_LIBRARY[track.typeId];
+                const port = MathUtils.getPorts(track.typeId)[connectorIndex];
+                return MathUtils.transformLocalToWorld(port.x, port.y, track.x, track.y, track.rotation);
+            },
+            
+            getConnectorWorldAngle: (track, connectorIndex) => {
+                const port = MathUtils.getPorts(track.typeId)[connectorIndex];
+                return (track.rotation + port.angle) % 360;
+            },
+            
+            // Baked-in rotation geometry for curves
+            // Ensures default orientation is Horizontal (180 deg start)
+            calculateCurveGeometry: (radius, angle) => {
+                 const rad = MathUtils.degToRad(angle);
+                 const h_angle = rad / 2;
+                 
+                 const dx = radius * Math.sin(h_angle);
+                 const sagitta = radius * (1 - Math.cos(h_angle));
+                 
+                 // Align visual center: shift Y so chord is centered on Y=0 (locally)
+                 // This minimizes the bounding box size
+                 const yOff = -sagitta / 2;
+                 
+                 // 1. Define Unrotated Symmetric Geometry (Chord horizontal)
+                 // Curve bulges UP (Negative Y). Center is DOWN (Positive Y).
+                 const u_p0 = { x: -dx, y: yOff };
+                 const u_p1 = { x: dx, y: yOff };
+                 const u_center = { x: 0, y: yOff + radius * Math.cos(h_angle) };
+                 const u_peak = { x: 0, y: yOff - sagitta }; // Top of the arc
+                 
+                 // 2. Rotate everything by +angle/2 so P0 aligns with 180 degrees (Left)
+                 const rot = angle / 2;
+                 
+                 const r_p0 = MathUtils.rotatePoint(u_p0.x, u_p0.y, rot);
+                 const r_p1 = MathUtils.rotatePoint(u_p1.x, u_p1.y, rot);
+                 const r_center = MathUtils.rotatePoint(u_center.x, u_center.y, rot);
+                 const r_peak = MathUtils.rotatePoint(u_peak.x, u_peak.y, rot);
+                 
+                 return {
+                     // P0 tangent: (180 - A/2) + A/2 = 180
+                     // P1 tangent: (A/2) + A/2 = A
+                     p0: { x: r_p0.x, y: r_p0.y, angle: 180 }, 
+                     p1: { x: r_p1.x, y: r_p1.y, angle: angle }, 
+                     localCenter: { x: r_center.x, y: r_center.y },
+                     peak: { x: r_peak.x, y: r_peak.y }
+                 };
+            },
+
+            getPorts: (typeId, radiusOffset = 0) => {
+                const def = TRACK_LIBRARY[typeId];
+                if(radiusOffset === 0 && def.ports) return def.ports;
+                
+                let ports = [];
+
+                if(def.type === 'straight') {
+                    const y = radiusOffset; 
+                    ports = [
+                        { x: -def.length/2, y: y, angle: 180, gauge: 16.5 },
+                        { x: def.length/2, y: y, angle: 0, gauge: 16.5 }
+                    ];
+                } else if (def.type === 'buffer') {
+                    const y = radiusOffset;
+                    ports = [
+                        { x: -def.length/2, y: y, angle: 180, gauge: 16.5 }
+                    ];
+                } else if (def.type === 'curve') {
+                    // FIX: Re-calculate geometry with offset radius.
+                    // This handles the concentric rail drawing correctly.
+                    const offsetGeo = MathUtils.calculateCurveGeometry(def.radius + radiusOffset, def.angle);
+                    
+                    ports = [
+                         { x: offsetGeo.p0.x, y: offsetGeo.p0.y, angle: offsetGeo.p0.angle, gauge: 16.5 },
+                         { x: offsetGeo.p1.x, y: offsetGeo.p1.y, angle: offsetGeo.p1.angle, gauge: 16.5 }
+                    ];
+                    
+                } else if (def.type === 'turnout') {
+                    const l = def.length;
+                    const y = radiusOffset; 
+                    ports = [
+                        { x: -l/2, y: y, angle: 180, gauge: 16.5 }, 
+                        { x: l/2, y: y, angle: 0, gauge: 16.5 }
+                    ];
+                    
+                    const r = def.radius + radiusOffset; 
+                    const ang = def.direction === 'left' ? -22.5 : 22.5;
+                    const rad = MathUtils.degToRad(Math.abs(ang));
+                    const bx = -l/2 + (r * Math.sin(rad));
+                    const by = y + (def.direction === 'left' ? -1 : 1) * (r * (1 - Math.cos(rad)));
+                    
+                    ports.push({ x: bx, y: by, angle: ang, gauge: 16.5 });
+                }
+                
+                if(radiusOffset === 0) def.ports = ports;
+                return ports;
+            },
+            
+            getTrackLength: (typeId) => {
+                const def = TRACK_LIBRARY[typeId];
+                if (def.type === 'straight' || def.type === 'buffer') return def.length;
+                if (def.type === 'curve') return 2 * Math.PI * def.radius * (def.angle / 360);
+                if (def.type === 'turnout') return def.length;
+                return 0;
+            },
+
+            getRotatedBounds: (typeId, rotation) => {
+                const def = TRACK_LIBRARY[typeId];
+                let points = [];
+                const W = 30; 
+
+                if (def.type === 'straight' || def.type === 'buffer') {
+                    points = [{x: -def.length/2, y: -W/2}, {x: def.length/2, y: -W/2}, {x: -def.length/2, y: W/2}, {x: def.length/2, y: W/2}];
+                } else if (def.type === 'curve') {
+                    // Use the unified geometry calculator
+                    const geo = MathUtils.calculateCurveGeometry(def.radius, def.angle);
+                    // Add corners at P0 and P1 with thickness
+                    points.push(geo.p0);
+                    points.push(geo.p1);
+                    points.push(geo.peak);
+                } else if (def.type === 'turnout') {
+                     const ports = MathUtils.getPorts(typeId, 0); 
+                     ports.forEach(p => points.push({x: p.x, y: p.y}));
+                     const r = def.radius;
+                }
+
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                points.forEach(p => {
+                    const r = MathUtils.rotatePoint(p.x, p.y, rotation);
+                    if(r.x < minX) minX = r.x;
+                    if(r.x > maxX) maxX = r.x;
+                    if(r.y < minY) minY = r.y;
+                    if(r.y > maxY) maxY = r.y;
+                });
+                
+                // Expand by Track Width/2
+                return { minX: minX - W/2, maxX: maxX + W/2, minY: minY - W/2, maxY: maxY + W/2 };
+            },
+
+            // --- COLLISION & GRAPH LOGIC ---
+            getCollisionSegments: (track) => {
+                const def = TRACK_LIBRARY[track.typeId];
+                let segments = [];
+                const toWorld = (p) => MathUtils.transformLocalToWorld(p.x, p.y, track.x, track.y, track.rotation);
+
+                if (def.type === 'straight' || def.type === 'buffer') {
+                    segments.push({ p1: toWorld({x: -def.length/2, y: 0}), p2: toWorld({x: def.length/2, y: 0}) });
+                } else if (def.type === 'curve') {
+                    // 2-segment approximation using the corrected peak
+                    const geo = MathUtils.calculateCurveGeometry(def.radius, def.angle);
+                    segments.push({ p1: toWorld(geo.p0), p2: toWorld(geo.peak) });
+                    segments.push({ p1: toWorld(geo.peak), p2: toWorld(geo.p1) });
+                } else if (def.type === 'turnout') {
+                    segments.push({ p1: toWorld({x: -def.length/2, y: 0}), p2: toWorld({x: def.length/2, y: 0}) });
+                    const ports = MathUtils.getPorts(track.typeId);
+                    segments.push({ p1: toWorld({x: -def.length/2, y: 0}), p2: toWorld(ports[2]) });
+                }
+                return segments;
+            },
+
+            segmentToSegmentDistance: (seg1, seg2) => {
+                const p1 = seg1.p1, p2 = seg1.p2, p3 = seg2.p1, p4 = seg2.p2;
+                const samples1 = [p1, p2, {x: (p1.x+p2.x)/2, y: (p1.y+p2.y)/2}];
+                const samples2 = [p3, p4, {x: (p3.x+p4.x)/2, y: (p3.y+p4.y)/2}];
+                let minDist = Infinity;
+                for(let p of samples1) minDist = Math.min(minDist, MathUtils.pointToSegmentDist(p, p3, p4));
+                for(let p of samples2) minDist = Math.min(minDist, MathUtils.pointToSegmentDist(p, p1, p2));
+                return minDist;
+            },
+
+            pointToSegmentDist: (p, v, w) => {
+                const l2 = (v.x - w.x)**2 + (v.y - w.y)**2;
+                if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+                let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+                t = Math.max(0, Math.min(1, t));
+                return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
+            },
+            
+            checkPointInTrack: (px, py, track) => {
+                const local = MathUtils.rotatePoint(px - track.x, py - track.y, -track.rotation);
+                const bounds = MathUtils.getRotatedBounds(track.typeId, 0); 
+                const margin = 5;
+                return (local.x >= bounds.minX - margin && local.x <= bounds.maxX + margin &&
+                        local.y >= bounds.minY - margin && local.y <= bounds.maxY + margin);
+            }
+        };
+
+        const app = {
+            state: {
+                tracks: [], 
+                board: { w: 2440, h: 1220 },
+                history: [],
+                historyIndex: -1,
+                selection: [],
+                camera: { x: 0, y: 0, zoom: 0.5 },
+                tool: 'select', 
+                simulation: { active: false, voltage: false, compatibility: 'standard' },
+                drag: null,
+                lastSave: Date.now()
+            },
+
+            ui: {
+                init: () => {
+                    app.ui.renderLibrary();
+                    app.renderer.init();
+                    app.initListeners();
+                    app.loadFromStorage();
+                    lucide.createIcons();
+                },
+                
+                renderLibrary: () => {
+                    const grid = document.getElementById('library-grid');
+                    grid.innerHTML = ''; 
+                    Object.values(TRACK_LIBRARY).forEach(item => {
+                        const el = document.createElement('div');
+                        el.className = 'bg-slate-800/40 p-2 rounded-sm cursor-grab hover:bg-slate-700 hover:border-sky-500/50 border border-white/5 transition group flex flex-col items-center gap-1 active:cursor-grabbing';
+                        el.draggable = true;
+                        el.ondragstart = (e) => app.handleDragStart(e, item.id);
+                        
+                        let dims = '';
+                        if(item.type === 'straight' || item.type === 'buffer') {
+                            const inch = (item.length / 25.4).toFixed(1);
+                            dims = `${item.length}mm`;
+                        } else if (item.type === 'curve') {
+                            const rInch = (item.radius / 25.4).toFixed(1);
+                            dims = `R${item.radius}`;
+                        } else if (item.type === 'turnout') {
+                            dims = `${item.length}mm`;
+                        }
+
+                        el.innerHTML = `
+                            <svg viewBox="0 0 50 50" class="w-8 h-8 overflow-visible stroke-slate-400 group-hover:stroke-sky-300 transition mb-1">
+                                <path d="${item.thumb}" fill="none" stroke-width="2" stroke-linecap="round" />
+                            </svg>
+                            <span class="text-[10px] text-center text-slate-300 font-medium leading-none">${item.name}</span>
+                            <span class="text-[9px] text-center text-slate-500 font-mono tracking-tighter">${dims}</span>
+                        `;
+                        grid.appendChild(el);
+                    });
+                },
+
+                updateInspector: () => {
+                    const panel = document.getElementById('inspector-panel');
+                    const content = document.getElementById('inspector-content');
+                    const multiPanel = document.getElementById('inspector-multi');
+                    
+                    if (app.state.selection.length === 0) {
+                        panel.style.transform = 'translateX(120%)';
+                        return;
+                    }
+                    panel.style.transform = 'translateX(0)';
+
+                    if (app.state.selection.length > 1) {
+                        content.classList.add('hidden');
+                        multiPanel.classList.remove('hidden');
+                        
+                        let totalLen = 0;
+                        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+                        app.state.selection.forEach(id => {
+                            const t = app.state.tracks.find(x => x.id === id);
+                            if(t) {
+                                totalLen += MathUtils.getTrackLength(t.typeId);
+                                const b = MathUtils.getRotatedBounds(t.typeId, t.rotation);
+                                minX = Math.min(minX, t.x + b.minX);
+                                maxX = Math.max(maxX, t.x + b.maxX);
+                                minY = Math.min(minY, t.y + b.minY);
+                                maxY = Math.max(maxY, t.y + b.maxY);
+                            }
+                        });
+                        
+                        const w = Math.round(maxX - minX);
+                        const h = Math.round(maxY - minY);
+
+                        document.getElementById('multi-count').innerText = app.state.selection.length;
+                        document.getElementById('multi-length-mm').innerText = Math.round(totalLen) + 'mm';
+                        const realMeters = (totalLen * 76.2) / 1000;
+                        document.getElementById('multi-length-m').innerText = realMeters.toFixed(1) + 'm';
+                        if(minX !== Infinity) {
+                            document.getElementById('multi-bounds').innerText = `${w} x ${h} mm`;
+                        }
+                        return;
+                    }
+
+                    content.classList.remove('hidden');
+                    multiPanel.classList.add('hidden');
+                    const track = app.state.tracks.find(t => t.id === app.state.selection[0]);
+                    const def = TRACK_LIBRARY[track.typeId];
+                    
+                    content.innerHTML = `
+                        <div class="text-[10px] text-sky-500 font-mono mb-1">ID: ${def.id}</div>
+                        <div class="text-lg font-bold leading-none mb-4 text-white">${def.name}</div>
+                        <div class="space-y-3">
+                            <label class="flex items-center gap-2 text-xs text-slate-300 p-2 bg-slate-800/50 rounded-sm border border-white/5 cursor-pointer hover:bg-slate-800 transition">
+                                <input type="checkbox" onchange="app.updateTrackProp('${track.id}', 'powerSource', this.checked)" ${track.powerSource ? 'checked' : ''} class="accent-sky-500">
+                                <i data-lucide="zap" class="w-3 h-3 text-yellow-400"></i> Power Feed
+                            </label>
+                            <label class="flex items-center gap-2 text-xs text-slate-300 p-2 bg-slate-800/50 rounded-sm border border-white/5 cursor-pointer hover:bg-slate-800 transition">
+                                <input type="checkbox" onchange="app.updateTrackProp('${track.id}', 'pinned', this.checked)" ${track.pinned ? 'checked' : ''} class="accent-sky-500">
+                                <i data-lucide="anchor" class="w-3 h-3 text-sky-400"></i> Pinned (Structure)
+                            </label>
+                             <div class="pt-2">
+                                <div class="text-[10px] text-slate-500 mb-1 uppercase font-bold tracking-wider">Notes</div>
+                                <textarea class="w-full bg-slate-900/80 border border-slate-700/50 rounded-sm p-2 text-xs text-sky-100 focus:border-sky-500 outline-none resize-none h-20 font-mono" placeholder="// Enter notes..." onchange="app.updateTrackProp('${track.id}', 'notes', this.value)">${track.notes || ''}</textarea>
+                            </div>
+                        </div>
+                    `;
+                    lucide.createIcons();
+                },
+                
+                showToast: (msg) => {
+                    const t = document.getElementById('toast');
+                    t.innerText = msg;
+                    t.style.opacity = '1';
+                    t.style.transform = 'translate(-50%, -80px)';
+                    setTimeout(() => {
+                        t.style.opacity = '0';
+                        t.style.transform = 'translate(-50%, 0)';
+                    }, 2000);
+                },
+
+                updateZoomDisplay: () => {
+                    document.getElementById('zoom-level').innerText = Math.round(app.state.camera.zoom * 100) + '%';
+                },
+
+                setInspectorVisible: (visible) => {
+                    const panel = document.getElementById('inspector-panel');
+                    if (!visible) {
+                        panel.style.transform = 'translateX(120%)';
+                    } else if (app.state.selection.length > 0) {
+                        panel.style.transform = 'translateX(0)';
+                    }
+                }
+            },
+
+            renderer: {
+                canvas: null,
+                ctx: null,
+                svg: null,
+                layerOverlay: null,
+                layerGrid: null,
+                
+                init: () => {
+                    app.renderer.canvas = document.getElementById('main-canvas');
+                    app.renderer.ctx = app.renderer.canvas.getContext('2d');
+                    app.renderer.svg = document.getElementById('main-svg');
+                    app.renderer.layerOverlay = document.getElementById('overlay-layer');
+                    app.renderer.layerGrid = document.getElementById('grid-layer');
+                    
+                    window.addEventListener('resize', app.renderer.resize);
+                    app.renderer.resize();
+                },
+                
+                resize: () => {
+                    const c = app.renderer.canvas;
+                    c.width = c.parentElement.clientWidth;
+                    c.height = c.parentElement.clientHeight;
+                    app.renderer.renderTracks(); // Redraw
+                    app.renderer.renderBoard();  // SVG update
+                },
+
+                renderBoard: () => {
+                    const g = app.renderer.layerGrid;
+                    g.innerHTML = '';
+                    const w = app.state.board.w;
+                    const h = app.state.board.h;
+                    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                    rect.setAttribute('x', -w/2);
+                    rect.setAttribute('y', -h/2);
+                    rect.setAttribute('width', w);
+                    rect.setAttribute('height', h);
+                    rect.setAttribute('class', 'layout-boundary');
+                    g.appendChild(rect);
+
+                    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    label.setAttribute('x', -w/2);
+                    label.setAttribute('y', -h/2 - 10);
+                    label.setAttribute('class', 'layout-label');
+                    label.textContent = `Board: ${w}mm x ${h}mm`;
+                    g.appendChild(label);
+                    
+                    app.renderer.updateViewBox();
+                },
+
+                updateViewBox: () => {
+                    const { x, y, zoom } = app.state.camera;
+                    const cw = app.renderer.canvas.width;
+                    const ch = app.renderer.canvas.height;
+                    const vw = cw / zoom;
+                    const vh = ch / zoom;
+                    const vx = x - vw / 2;
+                    const vy = y - vh / 2;
+                    app.renderer.svg.setAttribute('viewBox', `${vx} ${vy} ${vw} ${vh}`);
+                },
+                
+                // MAIN CANVAS RENDER
+                renderTracks: () => {
+                    const ctx = app.renderer.ctx;
+                    const { width, height } = app.renderer.canvas;
+                    const { x, y, zoom } = app.state.camera;
+                    
+                    // Clear
+                    ctx.clearRect(0, 0, width, height);
+                    
+                    // Camera Transform
+                    ctx.save();
+                    ctx.translate(width/2, height/2);
+                    ctx.scale(zoom, zoom);
+                    ctx.translate(-x, -y);
+                    
+                    // Draw Tracks
+                    const GAUGE = 8.25; 
+                    const isPrint = window.matchMedia('print').matches;
+
+                    app.state.tracks.forEach(track => {
+                        app.renderer.drawTrack(ctx, track, GAUGE, isPrint);
+                    });
+                    
+                    ctx.restore();
+                    
+                    // Sync SVG overlay viewbox
+                    app.renderer.updateViewBox();
+                },
+
+                drawTrack: (ctx, track, GAUGE, isPrint) => {
+                    const def = TRACK_LIBRARY[track.typeId];
+                    const isSelected = app.state.selection.includes(track.id);
+                    const isCollision = track.isColliding;
+                    
+                    ctx.save();
+                    ctx.translate(track.x, track.y);
+                    ctx.rotate(track.rotation * Math.PI / 180);
+
+                    // Styles
+                    let railColor = isPrint ? '#000000' : (isCollision ? '#ef4444' : '#e0f2fe');
+                    const sleeperColor = isPrint ? '#94a3b8' : (isCollision ? 'rgba(239, 68, 68, 0.3)' : 'rgba(255, 255, 255, 0.15)');
+                    const highlightColor = isCollision ? 'rgba(239, 68, 68, 0.1)' : 'rgba(56, 189, 248, 0.3)';
+                    const fixedRailWidth = 1.5;
+
+                    // Simulation Color Override
+                    if (app.state.simulation.active && !isPrint && !isCollision) {
+                        if (track.simVoltage !== undefined) {
+                            if (track.simVoltage > 10) railColor = '#4ade80';      // Green (High)
+                            else if (track.simVoltage > 7) railColor = '#facc15'; // Yellow (Med)
+                            else railColor = '#f87171';                           // Red (Low)
+                        } else {
+                            railColor = '#f87171'; // Disconnected / Error
+                        }
+                    }
+
+                    // Highlight / Selection Halo
+                    if (isSelected || isCollision) {
+                        ctx.strokeStyle = highlightColor;
+                        ctx.lineWidth = 32;
+                        ctx.lineCap = 'butt';
+                        app.renderer.pathTrackCenter(ctx, def);
+                        ctx.stroke();
+                    }
+
+                    // Sleepers
+                    ctx.strokeStyle = sleeperColor;
+                    ctx.lineWidth = 24;
+                    ctx.setLineDash([3, 5]); // 3mm sleeper, 5mm gap
+                    app.renderer.pathTrackCenter(ctx, def);
+                    ctx.stroke();
+                    ctx.setLineDash([]); // Reset dash
+
+                    // Rails (Left & Right)
+                    ctx.strokeStyle = railColor;
+                    ctx.lineWidth = fixedRailWidth;
+                    
+                    // Left Rail (-offset)
+                    ctx.beginPath();
+                    app.renderer.pathTrackOffset(ctx, def, -GAUGE);
+                    ctx.stroke();
+                    
+                    // Right Rail (+offset)
+                    ctx.beginPath();
+                    app.renderer.pathTrackOffset(ctx, def, GAUGE);
+                    ctx.stroke();
+
+                    // Port Labels & Connectors (Only if selected and not printing)
+                    if (isSelected && !isPrint) {
+                        const ports = MathUtils.getPorts(track.typeId);
+                        ctx.fillStyle = '#7dd3fc';
+                        ctx.font = 'bold 8px monospace';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        
+                        ports.forEach((p, i) => {
+                            // Rotate text to be upright relative to screen? Or track?
+                            // Let's draw in local space
+                            const lx = p.x - (Math.cos(p.angle * Math.PI/180) * 12);
+                            const ly = p.y - (Math.sin(p.angle * Math.PI/180) * 12);
+                            ctx.fillText(i.toString(), lx, ly);
+                            
+                            // Connector rect
+                            ctx.save();
+                            ctx.translate(p.x, p.y);
+                            ctx.rotate(p.angle * Math.PI/180);
+                            ctx.fillStyle = '#38bdf8';
+                            // Draw 2 rects for rails
+                            ctx.fillRect(-2, -GAUGE-0.75, 4, 1.5);
+                            ctx.fillRect(-2, GAUGE-0.75, 4, 1.5);
+                            ctx.restore();
+                        });
+                    }
+                    
+                    // Voltage / Pins
+                    if (track.powerSource && !isPrint) {
+                        ctx.fillStyle = '#facc15';
+                        ctx.beginPath();
+                        ctx.arc(0, 0, 5, 0, Math.PI*2);
+                        ctx.fill();
+                        ctx.strokeStyle = 'black';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+
+                    ctx.restore();
+                },
+
+                pathTrackCenter: (ctx, def) => {
+                    ctx.beginPath();
+                    if (def.type === 'straight' || def.type === 'buffer') {
+                        ctx.moveTo(-def.length/2, 0);
+                        ctx.lineTo(def.length/2, 0);
+                    } else if (def.type === 'curve') {
+                        const geo = MathUtils.calculateCurveGeometry(def.radius, def.angle);
+                        const c = geo.localCenter;
+                        const startA = Math.atan2(geo.p0.y - c.y, geo.p0.x - c.x);
+                        const endA = Math.atan2(geo.p1.y - c.y, geo.p1.x - c.x);
+                        
+                        // Ensure shortest path arc
+                        let anticlockwise = false;
+                        let diff = endA - startA;
+                        // Normalize to -PI..PI
+                        while (diff <= -Math.PI) diff += 2*Math.PI;
+                        while (diff > Math.PI) diff -= 2*Math.PI;
+                        
+                        if (diff < 0) anticlockwise = true;
+                        
+                        ctx.arc(c.x, c.y, def.radius, startA, endA, anticlockwise);
+                    } else if (def.type === 'turnout') {
+                        // Straight
+                        ctx.moveTo(-def.length/2, 0);
+                        ctx.lineTo(def.length/2, 0);
+                    }
+                },
+
+                pathTrackOffset: (ctx, def, offset) => {
+                    if (def.type === 'straight' || def.type === 'buffer') {
+                        ctx.moveTo(-def.length/2, offset);
+                        ctx.lineTo(def.length/2, offset);
+                    } else if (def.type === 'curve') {
+                        const geo = MathUtils.calculateCurveGeometry(def.radius, def.angle);
+                        const c = geo.localCenter;
+                        const startA = Math.atan2(geo.p0.y - c.y, geo.p0.x - c.x);
+                        const endA = Math.atan2(geo.p1.y - c.y, geo.p1.x - c.x);
+                        
+                        let anticlockwise = false;
+                        let diff = endA - startA;
+                        while (diff <= -Math.PI) diff += 2*Math.PI;
+                        while (diff > Math.PI) diff -= 2*Math.PI;
+                        if (diff < 0) anticlockwise = true;
+
+                        ctx.arc(c.x, c.y, def.radius + offset, startA, endA, anticlockwise);
+                    } else if (def.type === 'turnout') {
+                         ctx.moveTo(-def.length/2, offset);
+                         ctx.lineTo(def.length/2, offset);
+                    }
+                }
+            },
+            
+            // --- ACTIONS ---
+            updateBoardSize: () => {
+                const w = parseFloat(document.getElementById('board-w').value) || 2440;
+                const h = parseFloat(document.getElementById('board-h').value) || 1220;
+                app.state.board = { w, h };
+                app.saveState();
+                app.renderer.renderBoard();
+            },
+
+            addTrack: (typeId, x, y) => {
+                try {
+                    app.saveState();
+                    const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
+                    let initialRot = 0;
+                    const def = TRACK_LIBRARY[typeId];
+                    if(def.type === 'curve') initialRot = def.angle / 2;
+
+                    const newTrack = {
+                        id, typeId, x, y, rotation: 0, pinned: false, powerSource: false, connections: {}
+                    };
+                    
+                    app.state.tracks.push(newTrack);
+                    if(app.checkCollision(newTrack)) {
+                        newTrack.isColliding = true;
+                        app.ui.showToast("Warning: Overlapping/OOB placement");
+                    }
+                    app.state.selection = [id];
+                    app.renderer.renderTracks();
+                    app.ui.updateInspector();
+                    return id;
+                } catch(e) { console.error(e); }
+            },
+            
+            deleteSelection: () => {
+                if(app.state.selection.length === 0) return;
+                app.saveState();
+                app.state.selection.forEach(delId => {
+                    app.state.tracks.forEach(t => {
+                        if(t.connections) {
+                            Object.entries(t.connections).forEach(([port, conn]) => {
+                                if(conn.id === delId) delete t.connections[port];
+                            });
+                        }
+                    });
+                });
+                app.state.tracks = app.state.tracks.filter(t => !app.state.selection.includes(t.id));
+                app.state.selection = [];
+                app.renderer.renderTracks();
+                app.ui.updateInspector();
+            },
+
+            rotateSelection: (deg) => {
+                if(app.state.selection.length === 0) return;
+                app.saveState();
+                app.state.tracks.forEach(t => {
+                    if(app.state.selection.includes(t.id)) {
+                        t.rotation = (t.rotation + deg) % 360;
+                        app.breakConnections(t);
+                    }
+                });
+                let collision = false;
+                app.state.selection.forEach(id => {
+                    const t = app.state.tracks.find(x => x.id === id);
+                    t.isColliding = app.checkCollision(t);
+                    if(t.isColliding) collision = true;
+                });
+                if(collision) app.ui.showToast("Warning: Rotation caused overlap");
+                app.renderer.renderTracks();
+            },
+
+            breakConnections: (track) => {
+                if(!track.connections) return;
+                Object.entries(track.connections).forEach(([port, conn]) => {
+                    const neighbor = app.state.tracks.find(x => x.id === conn.id);
+                    if(neighbor && neighbor.connections && neighbor.connections[conn.port]) {
+                        if(!app.state.selection.includes(neighbor.id)) {
+                            delete neighbor.connections[conn.port];
+                            delete track.connections[port];
+                        }
+                    }
+                });
+            },
+
+            updateTrackProp: (id, prop, val) => {
+                const t = app.state.tracks.find(x => x.id === id);
+                if(t) {
+                    t[prop] = val;
+                    if(app.state.simulation.active) app.runSimulation();
+                    app.renderer.renderTracks();
+                }
+            },
+
+            printLayout: () => {
+                const originalZoom = app.state.camera.zoom;
+                const originalX = app.state.camera.x;
+                const originalY = app.state.camera.y;
+                app.fitView();
+                setTimeout(() => {
+                    window.print();
+                    app.state.camera.zoom = originalZoom;
+                    app.state.camera.x = originalX;
+                    app.state.camera.y = originalY;
+                    app.renderer.updateViewBox();
+                    app.renderer.renderTracks();
+                    app.ui.updateZoomDisplay();
+                }, 500);
+            },
+
+            handleDragStart: (e, typeId) => {
+                e.dataTransfer.setData('text/plain', typeId);
+                e.dataTransfer.setData('typeId', typeId);
+                app.ui.setInspectorVisible(false);
+            },
+            
+            // --- HIT TEST ---
+            getTrackAt: (wx, wy) => {
+                for(let i=app.state.tracks.length-1; i>=0; i--) {
+                    const track = app.state.tracks[i];
+                    if(MathUtils.checkPointInTrack(wx, wy, track)) {
+                        return track;
+                    }
+                }
+                return null;
+            },
+            
+            handleTrackMouseDown: (e, id) => { /* Replaced by global handler */ },
+
+            checkCollision: (track, ignoreList = []) => {
+                const limitX = app.state.board.w / 2;
+                const limitY = app.state.board.h / 2;
+                const b = MathUtils.getRotatedBounds(track.typeId, track.rotation);
+                if (track.x + b.minX < -limitX || track.x + b.maxX > limitX || track.y + b.minY < -limitY || track.y + b.maxY > limitY) return true;
+                
+                const mySegs = MathUtils.getCollisionSegments(track);
+                const COLLISION_THRESHOLD = 20; 
+
+                for(const other of app.state.tracks) {
+                    if(other.id === track.id) continue;
+                    if(ignoreList.includes(other.id)) continue;
+                    
+                    if(Math.abs(track.x - other.x) > 500 || Math.abs(track.y - other.y) > 500) continue;
+
+                    let isConnected = false;
+                    if(track.connections) {
+                        for(let conn of Object.values(track.connections)) { if(conn.id === other.id) { isConnected = true; break; } }
+                    }
+                    if(isConnected) continue;
+                    const otherSegs = MathUtils.getCollisionSegments(other);
+                    for(let s1 of mySegs) { for(let s2 of otherSegs) { if(MathUtils.segmentToSegmentDistance(s1, s2) < COLLISION_THRESHOLD) return true; } }
+                }
+                return false;
+            },
+
+            handleGlobalMouseMove: (e) => {
+                if (app.state.isPanning) {
+                    app.state.camera.x -= e.movementX / app.state.camera.zoom;
+                    app.state.camera.y -= e.movementY / app.state.camera.zoom;
+                    app.renderer.updateViewBox(); 
+                    app.renderer.renderTracks(); 
+                    return;
+                }
+                if (app.state.drag) {
+                    const currentWorld = app.screenToWorld(e.clientX, e.clientY);
+                    const dx = currentWorld.x - app.state.drag.startX;
+                    const dy = currentWorld.y - app.state.drag.startY;
+                    const isGroup = app.state.selection.length > 1;
+                    app.renderer.layerOverlay.innerHTML = '';
+                    app.state.drag.pendingSnap = null;
+                    
+                    if (isGroup) {
+                         app.state.drag.groupOffsets.forEach(off => {
+                             const t = app.state.tracks.find(x => x.id === off.id);
+                             t.x = off.ox + dx; t.y = off.oy + dy;
+                             t.isColliding = app.checkCollision(t);
+                         });
+                    } else {
+                        const track = app.state.tracks.find(t => t.id === app.state.drag.trackId);
+                        let newX = app.state.drag.originalX + dx;
+                        let newY = app.state.drag.originalY + dy;
+                        let newRot = app.state.drag.originalRot;
+                        let bestSnap = null; let minSnapDist = 60; 
+                        const myPorts = MathUtils.getPorts(track.typeId);
+                        for (const other of app.state.tracks) {
+                            if (other.id === track.id) continue;
+                            const otherPorts = MathUtils.getPorts(other.typeId);
+                            for (let i = 0; i < myPorts.length; i++) {
+                                const myPortPos = MathUtils.transformLocalToWorld(myPorts[i].x, myPorts[i].y, newX, newY, newRot);
+                                for (let j = 0; j < otherPorts.length; j++) {
+                                    if(other.connections && other.connections[j]) continue;
+                                    const pOther = MathUtils.getConnectorWorldPos(other, j);
+                                    const aOther = MathUtils.getConnectorWorldAngle(other, j);
+                                    const dist = Math.hypot(myPortPos.x - pOther.x, myPortPos.y - pOther.y);
+                                    if (dist < minSnapDist) {
+                                        minSnapDist = dist;
+                                        const targetAngle = (aOther + 180) % 360;
+                                        const rotCalc = (targetAngle - myPorts[i].angle + 360) % 360;
+                                        const rotOffset = MathUtils.rotatePoint(myPorts[i].x, myPorts[i].y, rotCalc);
+                                        bestSnap = { x: pOther.x - rotOffset.x, y: pOther.y - rotOffset.y, rot: rotCalc, snapX: pOther.x, snapY: pOther.y, targetId: other.id, targetPort: j, myPort: i, occupied: (other.connections && other.connections[j]) };
+                                        
+                                        if (other.connections && other.connections[j]) bestSnap.occupied = true;
+                                    }
+                                }
+                            }
+                        }
+                        if (bestSnap) {
+                            newX = bestSnap.x; newY = bestSnap.y; newRot = bestSnap.rot;
+                            if(!bestSnap.occupied) app.state.drag.pendingSnap = bestSnap;
+                            
+                            const ind = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                            ind.setAttribute('cx', bestSnap.snapX); ind.setAttribute('cy', bestSnap.snapY); ind.setAttribute('r', 8); 
+                            ind.setAttribute('class', 'snap-indicator');
+                            if(bestSnap.occupied) ind.setAttribute('stroke', '#ef4444');
+                            app.renderer.layerOverlay.appendChild(ind);
+                        }
+                        track.x = newX; track.y = newY; track.rotation = newRot;
+                        
+                        const ignoreList = bestSnap && !bestSnap.occupied ? [bestSnap.targetId] : [];
+                        
+                        if(bestSnap && bestSnap.occupied) track.isColliding = true;
+                        else track.isColliding = app.checkCollision(track, ignoreList);
+                    }
+                    app.renderer.renderTracks();
+                }
+            },
+
+            handleGlobalMouseUp: (e) => {
+                app.state.isPanning = false;
+                if (app.state.drag) {
+                    const dragId = app.state.drag.trackId;
+                    if(app.state.drag.pendingSnap) {
+                        const s = app.state.drag.pendingSnap;
+                        const t1 = app.state.tracks.find(x => x.id === dragId);
+                        const t2 = app.state.tracks.find(x => x.id === s.targetId);
+                        if(t1 && t2) {
+                            if(!t1.connections) t1.connections = {}; if(!t2.connections) t2.connections = {};
+                            t1.connections[s.myPort] = { id: t2.id, port: s.targetPort };
+                            t2.connections[s.targetPort] = { id: t1.id, port: s.myPort };
+                        }
+                    }
+                    const itemsToCheck = app.state.selection.length > 1 ? app.state.selection : [dragId];
+                    let stillColliding = false;
+                    itemsToCheck.forEach(id => { const t = app.state.tracks.find(x => x.id === id); if(t) { if(t.isColliding) stillColliding = true; } });
+                    if(stillColliding) app.ui.showToast("Warning: Placement Invalid");
+                    app.saveState();
+                    app.state.drag = null;
+                    app.renderer.layerOverlay.innerHTML = ''; 
+                    app.ui.setInspectorVisible(true);
+                    app.ui.updateInspector();
+                    if(app.state.simulation.active) app.runSimulation();
+                    app.renderer.renderTracks();
+                }
+            },
+            
+            screenToWorld: (sx, sy) => {
+                const canvas = app.renderer.canvas;
+                const rect = canvas.getBoundingClientRect();
+                const relX = sx - rect.left;
+                const relY = sy - rect.top;
+                const zoom = app.state.camera.zoom || 0.5;
+                const { x, y } = app.state.camera;
+                return {
+                    x: x + (relX - canvas.width / 2) / zoom,
+                    y: y + (relY - canvas.height / 2) / zoom
+                };
+            },
+            toggleSimulation: () => {
+                app.state.simulation.active = !app.state.simulation.active;
+                const btn = document.getElementById('btn-sim');
+                const leg = document.getElementById('sim-legend');
+                if (app.state.simulation.active) {
+                    btn.classList.add('bg-white/10', 'text-sky-400', 'border-sky-500/50');
+                    leg.classList.remove('hidden');
+                    app.runSimulation();
+                } else {
+                    btn.classList.remove('bg-white/10', 'text-sky-400', 'border-sky-500/50');
+                    leg.classList.add('hidden');
+                    app.state.tracks.forEach(t => delete t.simVoltage);
+                    app.renderer.renderTracks();
+                }
+            },
+
+            runSimulation: () => {
+                const graph = {}; app.state.tracks.forEach(t => graph[t.id] = []);
+                app.state.tracks.forEach(t => {
+                    if(t.connections) {
+                        Object.values(t.connections).forEach(conn => {
+                            if(!graph[t.id].includes(conn.id)) graph[t.id].push(conn.id);
+                            if(graph[conn.id] && !graph[conn.id].includes(t.id)) graph[conn.id].push(t.id);
+                        });
+                    }
+                });
+
+                app.state.tracks.forEach(t => t.simVoltage = 0);
+                const queue = [];
+                app.state.tracks.filter(t => t.powerSource).forEach(t => { t.simVoltage = 12; queue.push({ id: t.id, v: 12 }); });
+                const visited = new Set();
+                while(queue.length > 0) {
+                    const curr = queue.shift();
+                    if(visited.has(curr.id)) { const t = app.state.tracks.find(x => x.id === curr.id); if(t.simVoltage < curr.v) t.simVoltage = curr.v; else continue; }
+                    visited.add(curr.id);
+                    const t = app.state.tracks.find(x => x.id === curr.id); t.simVoltage = curr.v;
+                    const drop = 0.5; const nextV = Math.max(0, curr.v - drop);
+                    if(graph[curr.id]) { graph[curr.id].forEach(nid => { queue.push({ id: nid, v: nextV }); }); }
+                }
+                app.renderer.renderTracks();
+            },
+
+            saveState: () => {
+                if (app.state.history.length > 20) app.state.history.shift();
+                app.state.history.push(JSON.stringify(app.state.tracks));
+                app.state.historyIndex = app.state.history.length - 1;
+                localStorage.setItem('railplanner_layout', JSON.stringify({ tracks: app.state.tracks, camera: app.state.camera, board: app.state.board }));
+            },
+            undo: () => { if (app.state.historyIndex > 0) { app.state.historyIndex--; app.state.tracks = JSON.parse(app.state.history[app.state.historyIndex]); app.renderer.renderTracks(); } },
+            redo: () => { if (app.state.historyIndex < app.state.history.length - 1) { app.state.historyIndex++; app.state.tracks = JSON.parse(app.state.history[app.state.historyIndex]); app.renderer.renderTracks(); } },
+            loadFromStorage: () => {
+                const data = localStorage.getItem('railplanner_layout');
+                if(data) {
+                    const parsed = JSON.parse(data);
+                    app.state.tracks = parsed.tracks || [];
+                    if(parsed.camera) { app.state.camera = parsed.camera; if(!app.state.camera.zoom) app.state.camera.zoom = 0.5; }
+                    if(parsed.board) app.state.board = parsed.board;
+                    document.getElementById('board-w').value = app.state.board.w;
+                    document.getElementById('board-h').value = app.state.board.h;
+                    app.renderer.renderTracks();
+                    app.saveState();
+                }
+            },
+            exportLayout: () => {
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(app.state.tracks));
+                const node = document.createElement('a');
+                node.setAttribute("href", dataStr); node.setAttribute("download", "layout.json"); document.body.appendChild(node); node.click(); node.remove(); app.ui.showToast('Layout Exported');
+            },
+            importLayout: (input) => {
+                const file = input.files[0]; if(!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => { try { const tracks = JSON.parse(e.target.result); app.state.tracks = tracks; app.renderer.renderTracks(); app.saveState(); app.ui.showToast('Layout Imported'); } catch(err) { alert('Invalid file'); } };
+                reader.readAsText(file);
+            },
+            zoomIn: () => { if(app.state.camera.zoom < 5) { app.state.camera.zoom *= 1.2; app.renderer.updateViewBox(); app.renderer.renderTracks(); app.ui.updateZoomDisplay(); } },
+            zoomOut: () => { if(app.state.camera.zoom > 0.1) { app.state.camera.zoom /= 1.2; app.renderer.updateViewBox(); app.renderer.renderTracks(); app.ui.updateZoomDisplay(); } },
+            resetView: () => { app.state.camera = { x: 0, y: 0, zoom: 0.5 }; app.renderer.updateViewBox(); app.renderer.renderTracks(); app.ui.updateZoomDisplay(); },
+            fitView: () => {
+                let minX = -app.state.board.w/2, maxX = app.state.board.w/2; let minY = -app.state.board.h/2, maxY = app.state.board.h/2;
+                if (app.state.tracks.length > 0) { app.state.tracks.forEach(t => { minX = Math.min(minX, t.x - 200); maxX = Math.max(maxX, t.x + 200); minY = Math.min(minY, t.y - 200); maxY = Math.max(maxY, t.y + 200); }); }
+                const w = maxX - minX; const h = maxY - minY; const cw = app.renderer.canvas.width; const ch = app.renderer.canvas.height;
+                let zoom = Math.min(cw/w, ch/h) * 0.9; zoom = Math.min(Math.max(zoom, 0.1), 5);
+                app.state.camera.x = (minX + maxX) / 2; app.state.camera.y = (minY + maxY) / 2; app.state.camera.zoom = zoom; 
+                app.renderer.updateViewBox(); app.renderer.renderTracks(); app.ui.updateZoomDisplay();
+            },
+            setTool: (t) => { app.state.tool = t; document.getElementById('tool-select').className = `p-2 rounded transition ${t==='select'?'bg-white/10 text-sky-400':'hover:bg-white/10 text-slate-400'}`; document.getElementById('tool-pan').className = `p-2 rounded transition ${t==='pan'?'bg-white/10 text-sky-400':'hover:bg-white/10 text-slate-400'}`; document.getElementById('canvas-container').style.cursor = t==='pan' ? 'grab' : 'default'; },
+            deselectAll: () => { app.state.selection = []; app.ui.updateInspector(); app.renderer.renderTracks(); },
+            initListeners: () => {
+                const container = document.getElementById('canvas-container');
+                container.ondragover = (e) => e.preventDefault();
+                container.ondrop = (e) => {
+                    e.preventDefault(); 
+                    let typeId = e.dataTransfer.getData('text/plain');
+                    if(!typeId) typeId = e.dataTransfer.getData('typeId'); 
+                    if(typeId && TRACK_LIBRARY[typeId]) {
+                        let w = app.screenToWorld(e.clientX, e.clientY);
+                        if (isNaN(w.x) || isNaN(w.y)) w = { x: 0, y: 0 };
+                        const limitX = app.state.board.w / 2; const limitY = app.state.board.h / 2;
+                        w.x = Math.max(-limitX, Math.min(limitX, w.x)); w.y = Math.max(-limitY, Math.min(limitY, w.y));
+                        app.addTrack(typeId, w.x, w.y);
+                    }
+                    app.ui.setInspectorVisible(true);
+                };
+                window.addEventListener('mousemove', app.handleGlobalMouseMove);
+                window.addEventListener('mouseup', app.handleGlobalMouseUp);
+                container.addEventListener('mousedown', (e) => { 
+                    if (app.state.tool === 'pan' || e.button === 1 || e.code === 'Space') { 
+                        app.state.isPanning = true; 
+                    } else { 
+                        // Hit Test for Canvas
+                        const w = app.screenToWorld(e.clientX, e.clientY);
+                        const clickedTrack = app.getTrackAt(w.x, w.y);
+                        
+                        if(clickedTrack) {
+                             if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                                if (app.state.selection.includes(clickedTrack.id)) {
+                                    app.state.selection = app.state.selection.filter(sid => sid !== clickedTrack.id);
+                                } else {
+                                    app.state.selection.push(clickedTrack.id);
+                                }
+                            } else {
+                                if (!app.state.selection.includes(clickedTrack.id)) {
+                                    app.state.selection = [clickedTrack.id];
+                                }
+                            }
+                            app.ui.updateInspector();
+                            
+                            // Start Drag
+                            // Break connections to non-selected
+                            app.state.selection.forEach(selId => {
+                                const t = app.state.tracks.find(x => x.id === selId);
+                                if(t) app.breakConnections(t);
+                            });
+
+                            app.state.drag = {
+                                trackId: clickedTrack.id,
+                                startX: w.x,
+                                startY: w.y,
+                                originalX: clickedTrack.x,
+                                originalY: clickedTrack.y,
+                                originalRot: clickedTrack.rotation,
+                                groupOffsets: app.state.selection.map(sid => {
+                                    const t = app.state.tracks.find(x => x.id === sid);
+                                    return { id: sid, ox: t.x, oy: t.y };
+                                }),
+                                pendingSnap: null
+                            };
+                            app.ui.setInspectorVisible(false);
+                            app.renderer.renderTracks();
+                        } else {
+                            if(!e.shiftKey && !e.ctrlKey && !e.metaKey) app.deselectAll();
+                        }
+                    } 
+                });
+                container.addEventListener('wheel', (e) => { e.preventDefault(); if(e.ctrlKey || e.metaKey) { if(e.deltaY < 0) app.zoomIn(); else app.zoomOut(); } else { app.state.camera.x += e.deltaX / app.state.camera.zoom; app.state.camera.y += e.deltaY / app.state.camera.zoom; app.renderer.updateViewBox(); app.renderer.renderTracks(); } }, { passive: false });
+                window.addEventListener('keydown', (e) => {
+                    if(e.key === 'Delete' || e.key === 'Backspace') app.deleteSelection();
+                    if((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); app.undo(); }
+                    if((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); app.redo(); }
+                    if(e.code === 'Space') app.setTool('pan');
+                    if(e.key.toLowerCase() === 'r') {
+                        if(app.state.drag) {
+                            app.state.drag.originalRot = (app.state.drag.originalRot + 45) % 360;
+                            const dummyEvent = { clientX: app.lastMouseX || 0, clientY: app.lastMouseY || 0, movementX: 0, movementY: 0 }; app.handleGlobalMouseMove(dummyEvent);
+                        } else if (app.state.selection.length > 0) { app.rotateSelection(45); }
+                    }
+                });
+                window.addEventListener('keyup', (e) => { if(e.code === 'Space') app.setTool('select'); });
+                window.addEventListener('mousemove', (e) => { app.lastMouseX = e.clientX; app.lastMouseY = e.clientY; });
+            }
+        };
+        window.onload = app.ui.init;
+    </script>
+</body>
+</html>
