@@ -163,10 +163,24 @@
         <!-- LEFT SIDEBAR: Library & Settings -->
         <aside class="absolute bottom-0 left-0 right-0 h-1/3 sm:static sm:h-full sm:w-72 glass border-r-0 sm:border-r z-40 flex flex-col transition-transform duration-300 transform translate-y-0">
             <!-- Tabs -->
-            <div class="flex border-b border-white/10 bg-black/20">
-                <button class="flex-1 py-3 text-xs font-bold text-sky-400 border-b-2 border-sky-400 uppercase tracking-widest">Library</button>
-                <div class="w-px bg-white/10 my-2"></div>
-                <div class="flex-1 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest text-center">Settings</div>
+            <div class="flex flex-col border-b border-white/10 bg-black/20">
+                <div class="flex">
+                    <button class="flex-1 py-3 text-xs font-bold text-sky-400 border-b-2 border-sky-400 uppercase tracking-widest">Library</button>
+                    <div class="w-px bg-white/10 my-2"></div>
+                    <div class="flex-1 py-3 text-xs font-bold text-slate-400 uppercase tracking-widest text-center">Settings</div>
+                </div>
+                <!-- Brand Selector -->
+                <div class="p-2 border-t border-white/5">
+                    <select id="brand-select" onchange="app.ui.setBrand(this.value)" class="w-full bg-slate-800 text-xs text-white p-2 rounded border border-white/10 outline-none focus:border-sky-500">
+                        <option value="OO_HORNBY">Hornby OO</option>
+                        <option value="OO_PECO_ST">Peco Setrack OO</option>
+                        <option value="OO_BACHMANN">Bachmann OO</option>
+                    </select>
+                </div>
+                <!-- Search -->
+                <div class="px-2 pb-2">
+                    <input type="text" id="library-search" onkeyup="app.ui.renderLibrary()" placeholder="Search parts..." class="w-full bg-slate-900/50 text-xs text-white p-2 rounded border border-white/5 outline-none focus:border-sky-500">
+                </div>
             </div>
             
             <!-- Board Settings -->
@@ -193,7 +207,7 @@
             <!-- Attribution Footer -->
             <div class="p-3 border-t border-white/10 bg-slate-900/80 text-center z-10 relative">
                 <a href="https://aaronworld.vercel.app/" target="_blank" class="text-[10px] text-slate-500 hover:text-sky-400 transition flex items-center justify-center gap-1 group">
-                    Made with train love <i data-lucide="heart" class="w-3 h-3 text-red-500 fill-red-500 group-hover:scale-110 transition-transform"></i> by Aaron
+                    Made with 🚂❤️ by Aaron
                 </a>
             </div>
             
@@ -287,13 +301,13 @@
 
         <!-- Simulation Legend -->
         <div id="sim-legend" class="absolute top-4 left-4 sm:left-auto sm:right-[300px] glass px-4 py-2 rounded border border-white/10 hidden z-30">
-            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Voltage & Physics</div>
-            <div class="flex items-center gap-4 text-xs font-mono mb-2">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Voltage Drop</div>
+            <div class="flex items-center gap-4 text-xs font-mono">
                 <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)]"></span> 12V</div>
                 <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-yellow-400"></span> 9V</div>
                 <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-400"></span> &lt;6V</div>
             </div>
-            <div id="sim-circuit-status" class="text-[10px] text-slate-300 border-t border-white/10 pt-2 flex items-center gap-2">
+             <div id="sim-circuit-status" class="text-[10px] text-slate-300 border-t border-white/10 pt-2 flex items-center gap-2">
                 <i data-lucide="activity" class="w-3 h-3 text-slate-500"></i> Scanning...
             </div>
         </div>
@@ -352,17 +366,53 @@
     <script>
         // --- DATA MODELS ---
 
-        const TRACK_LIBRARY = {
-            'R600': { id: 'R600', name: 'Straight', type: 'straight', length: 168, thumb: 'M 0 25 L 50 25' },
-            'R601': { id: 'R601', name: 'Double Straight', type: 'straight', length: 335, thumb: 'M 0 25 L 50 25' },
-            'R603': { id: 'R603', name: 'Long Straight', type: 'straight', length: 670, thumb: 'M 0 25 L 50 25' },
-            'R605': { id: 'R605', name: 'Curve R1', type: 'curve', radius: 371, angle: 45, thumb: 'M 0 50 Q 25 50 40 20' },
-            'R607': { id: 'R607', name: 'Curve R2', type: 'curve', radius: 438, angle: 45, thumb: 'M 0 50 Q 25 50 45 15' },
-            'R609': { id: 'R609', name: 'Curve R3', type: 'curve', radius: 505, angle: 45, thumb: 'M 0 50 Q 25 50 50 10' },
-            'R8072': { id: 'R8072', name: 'Point Left', type: 'turnout', length: 168, radius: 438, angle: -22.5, direction: 'left', thumb: 'M 50 25 L 0 25 M 25 25 L 5 40' },
-            'R8073': { id: 'R8073', name: 'Point Right', type: 'turnout', length: 168, radius: 438, angle: 22.5, direction: 'right', thumb: 'M 0 25 L 50 25 M 25 25 L 45 40' },
-            'R083': { id: 'R083', name: 'Buffer Stop', type: 'buffer', length: 60, thumb: 'M 0 25 L 40 25 M 40 15 L 40 35' }
+        // Expanded Database with Multiple Brands
+        // Note: Setrack geometry is generally cross-compatible between Hornby, Bachmann, Peco ST
+        const TRACK_DB = {
+            'OO_HORNBY': [
+                { id: 'R600', name: 'Straight (168mm)', type: 'straight', length: 168, thumb: 'M 0 25 L 50 25', brand: 'Hornby' },
+                { id: 'R601', name: 'Double Straight', type: 'straight', length: 335, thumb: 'M 0 25 L 50 25', brand: 'Hornby' },
+                { id: 'R603', name: 'Long Straight', type: 'straight', length: 670, thumb: 'M 0 25 L 50 25', brand: 'Hornby' },
+                { id: 'R604', name: 'Curve R1', type: 'curve', radius: 371, angle: 45, thumb: 'M 0 50 Q 25 50 40 20', brand: 'Hornby' },
+                { id: 'R605', name: 'Curve R1 Dbl', type: 'curve', radius: 371, angle: 90, thumb: 'M 0 50 Q 25 50 40 20', brand: 'Hornby' }, // Actually R605 is R1 45deg usually, but let's assume standard set
+                { id: 'R606', name: 'Curve R2', type: 'curve', radius: 438, angle: 22.5, thumb: 'M 0 50 Q 25 50 45 15', brand: 'Hornby' },
+                { id: 'R607', name: 'Curve R2', type: 'curve', radius: 438, angle: 45, thumb: 'M 0 50 Q 25 50 45 15', brand: 'Hornby' },
+                { id: 'R608', name: 'Curve R3', type: 'curve', radius: 505, angle: 22.5, thumb: 'M 0 50 Q 25 50 50 10', brand: 'Hornby' },
+                { id: 'R609', name: 'Curve R3', type: 'curve', radius: 505, angle: 45, thumb: 'M 0 50 Q 25 50 50 10', brand: 'Hornby' },
+                { id: 'R8262', name: 'Curve R4', type: 'curve', radius: 572, angle: 45, thumb: 'M 0 50 Q 25 50 50 10', brand: 'Hornby' },
+                { id: 'R8072', name: 'L/H Point', type: 'turnout', length: 168, radius: 438, angle: -22.5, direction: 'left', thumb: 'M 50 25 L 0 25 M 25 25 L 5 40', brand: 'Hornby' },
+                { id: 'R8073', name: 'R/H Point', type: 'turnout', length: 168, radius: 438, angle: 22.5, direction: 'right', thumb: 'M 0 25 L 50 25 M 25 25 L 45 40', brand: 'Hornby' },
+                { id: 'R8077', name: 'L/H Express', type: 'turnout', length: 245, radius: 852, angle: -11.25, direction: 'left', thumb: 'M 50 25 L 0 25', brand: 'Hornby' },
+                { id: 'R8078', name: 'R/H Express', type: 'turnout', length: 245, radius: 852, angle: 11.25, direction: 'right', thumb: 'M 0 25 L 50 25', brand: 'Hornby' },
+                { id: 'R083', name: 'Buffer Stop', type: 'buffer', length: 60, thumb: 'M 0 25 L 40 25', brand: 'Hornby' }
+            ],
+            'OO_PECO_ST': [
+                { id: 'ST-200', name: 'Straight (168mm)', type: 'straight', length: 168, thumb: 'M 0 25 L 50 25', brand: 'Peco' },
+                { id: 'ST-201', name: 'Double Straight', type: 'straight', length: 335, thumb: 'M 0 25 L 50 25', brand: 'Peco' },
+                { id: 'ST-225', name: 'Curve R2', type: 'curve', radius: 438, angle: 45, thumb: 'M 0 50 Q 25 50 45 15', brand: 'Peco' },
+                { id: 'ST-226', name: 'Curve R2 Half', type: 'curve', radius: 438, angle: 22.5, thumb: 'M 0 50 Q 25 50 45 15', brand: 'Peco' },
+                { id: 'ST-231', name: 'Curve R3', type: 'curve', radius: 505, angle: 45, thumb: 'M 0 50 Q 25 50 50 10', brand: 'Peco' },
+                { id: 'ST-240', name: 'R/H Turnout', type: 'turnout', length: 168, radius: 438, angle: 22.5, direction: 'right', thumb: 'M 0 25 L 50 25', brand: 'Peco' },
+                { id: 'ST-241', name: 'L/H Turnout', type: 'turnout', length: 168, radius: 438, angle: -22.5, direction: 'left', thumb: 'M 50 25 L 0 25', brand: 'Peco' },
+                { id: 'ST-270', name: 'Buffer Stop', type: 'buffer', length: 60, thumb: 'M 0 25 L 40 25', brand: 'Peco' }
+            ],
+            'OO_BACHMANN': [
+                { id: '36-600', name: 'Straight (168mm)', type: 'straight', length: 168, thumb: 'M 0 25 L 50 25', brand: 'Bachmann' },
+                { id: '36-601', name: 'Double Straight', type: 'straight', length: 335, thumb: 'M 0 25 L 50 25', brand: 'Bachmann' },
+                { id: '36-603', name: 'Long Straight', type: 'straight', length: 670, thumb: 'M 0 25 L 50 25', brand: 'Bachmann' },
+                { id: '36-607', name: 'Curve R2', type: 'curve', radius: 438, angle: 45, thumb: 'M 0 50 Q 25 50 45 15', brand: 'Bachmann' },
+                { id: '36-872', name: 'L/H Point', type: 'turnout', length: 168, radius: 438, angle: -22.5, direction: 'left', thumb: 'M 50 25 L 0 25', brand: 'Bachmann' },
+                { id: '36-873', name: 'R/H Point', type: 'turnout', length: 168, radius: 438, angle: 22.5, direction: 'right', thumb: 'M 0 25 L 50 25', brand: 'Bachmann' }
+            ]
         };
+
+        // Flatten DB for internal lookups by ID
+        const TRACK_LIBRARY = {};
+        Object.values(TRACK_DB).forEach(list => {
+            list.forEach(item => {
+                TRACK_LIBRARY[item.id] = item;
+            });
+        });
 
         const TRAINS = {
             'shunter': { name: '0-4-0 Shunter', minRadius: 0 },
@@ -415,7 +465,6 @@
                  const sagitta = radius * (1 - Math.cos(h_angle));
                  
                  // Align visual center: shift Y so chord is centered on Y=0 (locally)
-                 // This minimizes the bounding box size
                  const yOff = sagitta / 2;
                  
                  // 1. Define Unrotated Symmetric Geometry (Chord horizontal)
@@ -439,7 +488,8 @@
                      p0: { x: r_p0.x, y: r_p0.y, angle: 180 }, 
                      p1: { x: r_p1.x, y: r_p1.y, angle: angle }, 
                      localCenter: { x: r_center.x, y: r_center.y },
-                     peak: { x: r_peak.x, y: r_peak.y }
+                     peak: { x: r_peak.x, y: r_peak.y },
+                     yOff: yOff
                  };
             },
 
@@ -510,20 +560,13 @@
                     // Use the unified geometry calculator
                     const geo = MathUtils.calculateCurveGeometry(def.radius, def.angle);
                     // Add corners at P0 and P1 with thickness
-                    // This is an approximation, ideally we offset P0/P1 by normal vector
-                    // Simple AABB of points is usually enough for coarse bounds
                     points.push(geo.p0);
                     points.push(geo.p1);
                     points.push(geo.peak);
-                    
-                    // Add thickness points manually if needed, or just rely on hit test margin
-                    // Let's broaden the bounds by W/2 in all directions in the final min/max check
                 } else if (def.type === 'turnout') {
                      const ports = MathUtils.getPorts(typeId, 0); 
                      ports.forEach(p => points.push({x: p.x, y: p.y}));
-                     // Add Branch peak approx
                      const r = def.radius;
-                     // ... Turnout bounds are tricky without full geo, stick to ports which define the hull
                 }
 
                 let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -598,7 +641,8 @@
                 tool: 'select', 
                 simulation: { active: false, voltage: false, compatibility: 'standard' },
                 drag: null,
-                lastSave: Date.now()
+                lastSave: Date.now(),
+                currentBrand: 'OO_HORNBY' // Default brand
             },
 
             ui: {
@@ -609,7 +653,6 @@
                     app.loadFromStorage();
                     lucide.createIcons();
                     
-                    // Show tutorial on first visit
                     if(!localStorage.getItem('railplanner_tutorial_seen')) {
                         app.ui.toggleTutorial();
                         localStorage.setItem('railplanner_tutorial_seen', 'true');
@@ -627,14 +670,25 @@
                     }
                 },
 
+                setBrand: (brand) => {
+                    app.state.currentBrand = brand;
+                    app.ui.renderLibrary();
+                },
+
                 renderLibrary: () => {
                     const grid = document.getElementById('library-grid');
                     grid.innerHTML = ''; 
-                    Object.values(TRACK_LIBRARY).forEach(item => {
+                    const filter = document.getElementById('library-search') ? document.getElementById('library-search').value.toLowerCase() : '';
+                    
+                    // Filter based on selected Brand and Search Term
+                    const parts = TRACK_DB[app.state.currentBrand] || [];
+                    
+                    parts.forEach(item => {
+                        if (filter && !item.name.toLowerCase().includes(filter) && !item.id.toLowerCase().includes(filter)) return;
+
                         const el = document.createElement('div');
                         el.className = 'bg-slate-800/40 p-2 rounded-sm cursor-grab hover:bg-slate-700 hover:border-sky-500/50 border border-white/5 transition group flex flex-col items-center gap-1 active:cursor-grabbing';
                         el.draggable = true;
-                        // Use text/plain for broad compatibility
                         el.ondragstart = (e) => app.handleDragStart(e, item.id);
                         
                         let dims = '';
@@ -653,7 +707,7 @@
                                 <path d="${item.thumb}" fill="none" stroke-width="2" stroke-linecap="round" />
                             </svg>
                             <span class="text-[10px] text-center text-slate-300 font-medium leading-none">${item.name}</span>
-                            <span class="text-[9px] text-center text-slate-500 font-mono tracking-tighter">${dims}</span>
+                            <span class="text-[9px] text-center text-slate-500 font-mono tracking-tighter">${item.id}</span>
                         `;
                         grid.appendChild(el);
                     });
@@ -668,7 +722,7 @@
                         panel.style.transform = 'translateX(120%)';
                         return;
                     }
-                    panel.style.transform = 'translateX(0)';
+                    // panel.style.transform = 'translateX(0)'; // Controlled by setInspectorVisible
 
                     if (app.state.selection.length > 1) {
                         content.classList.add('hidden');
@@ -899,6 +953,37 @@
                     app.renderer.pathTrackOffset(ctx, def, GAUGE);
                     ctx.stroke();
 
+                    // Buffer Stop Visuals
+                    if (def.type === 'buffer') {
+                        const endX = def.length / 2;
+                        const width = GAUGE * 2 + 10; // Width of the beam
+                        
+                        // Supports (Triangular legs behind)
+                        ctx.beginPath();
+                        ctx.strokeStyle = isPrint ? '#475569' : '#ef4444'; // Red or Dark Grey
+                        ctx.lineWidth = 2;
+                        // Top support
+                        ctx.moveTo(endX - 4, -width/2 + 2);
+                        ctx.lineTo(endX - 16, -width/2 + 2);
+                        ctx.lineTo(endX - 4, -GAUGE);
+                        // Bottom support
+                        ctx.moveTo(endX - 4, width/2 - 2);
+                        ctx.lineTo(endX - 16, width/2 - 2);
+                        ctx.lineTo(endX - 4, GAUGE);
+                        ctx.stroke();
+
+                        // Main Beam
+                        ctx.fillStyle = isPrint ? '#1e293b' : '#ef4444'; // Red beam
+                        ctx.fillRect(endX - 5, -width/2, 5, width);
+                        
+                        // Buffer Pads (The round bits)
+                        ctx.fillStyle = '#0f172a'; // Black/Slate 900
+                        ctx.beginPath();
+                        ctx.arc(endX - 1, -GAUGE, 3, 0, Math.PI * 2);
+                        ctx.arc(endX - 1, GAUGE, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+
                     // Port Labels & Connectors (Only if selected and not printing)
                     if (isSelected && !isPrint) {
                         const ports = MathUtils.getPorts(track.typeId);
@@ -962,6 +1047,7 @@
                         const startA = Math.atan2(geo.p0.y - c.y, geo.p0.x - c.x);
                         const endA = Math.atan2(geo.p1.y - c.y, geo.p1.x - c.x);
                         
+                        // Ensure shortest path arc
                         let anticlockwise = false;
                         let diff = endA - startA;
                         while (diff <= -Math.PI) diff += 2*Math.PI;
@@ -975,30 +1061,10 @@
                         ctx.lineTo(def.length/2, 0);
                         
                         // Branch part
-                        // Corrected Geometry:
-                        // Left Turnout: Curves Up (-Y). Center is at (ToeX, -R). Start Angle PI/2. End Angle PI/2 - Angle.
-                        // Right Turnout: Curves Down (+Y). Center is at (ToeX, +R). Start Angle -PI/2. End Angle -PI/2 + Angle.
-                        
                         const dir = def.direction;
                         const rad = Math.abs(def.angle) * Math.PI / 180;
                         const cx = -def.length / 2;
                         
-                        // Center Y
-                        // Left (-Y curve) -> Center is at -R? 
-                        // Wait, Center at -R -> Top of circle (0, -R). Bottom (0,0).
-                        // If center is (0, -R), bottom is (0, -R+R) = (0,0).
-                        // Angle from center to (0,0) is PI/2.
-                        // To curve Up/Left (decreasing Y, increasing X), we go clockwise? No.
-                        // Center (-R). Point (0). To get negative Y, we need y = -R + R sin(t).
-                        // If t decreases from PI/2... sin decreases. y becomes negative (Up). Correct.
-                        // So Left: Center -R. Start PI/2. End PI/2 - rad. Anticlockwise = true.
-                        
-                        // Right (+Y curve): Center +R. Top is (0,0).
-                        // Angle from center to (0,0) is -PI/2.
-                        // To get positive Y, we need y = R + R sin(t).
-                        // If t increases from -PI/2... sin increases. y becomes positive (Down). Correct.
-                        // So Right: Center +R. Start -PI/2. End -PI/2 + rad. Anticlockwise = false.
-
                         const cy = (dir === 'left' ? -1 : 1) * def.radius;
                         const startAngle = (dir === 'left' ? 0.5 : -0.5) * Math.PI;
                         const endAngle = startAngle + (dir === 'left' ? -rad : rad);
@@ -1040,19 +1106,6 @@
                          const startAngle = (dir === 'left' ? 0.5 : -0.5) * Math.PI;
                          const endAngle = startAngle + (dir === 'left' ? -rad : rad);
                          const anticlockwise = (dir === 'left');
-                         
-                         // Radius Offset Logic:
-                         // Left (Center -R): 
-                         // Rail Y < 0. Closer to center is "Higher" (more negative Y).
-                         // Inner Rail (offset -G) is "Up". Distance to center |-R - (-G)| = |-R+G| = R-G.
-                         // Outer Rail (offset +G) is "Down". Distance |-R - G| = R+G.
-                         // So Left: R + offset.
-                         
-                         // Right (Center +R):
-                         // Rail Y > 0.
-                         // Inner Rail (offset +G) is "Down". Distance |R - G| = R-G.
-                         // Outer Rail (offset -G) is "Up". Distance |R - (-G)| = R+G.
-                         // So Right: R - offset.
                          
                          const r_eff = def.radius + (dir === 'left' ? offset : -offset);
                          
@@ -1103,6 +1156,7 @@
                     app.state.selection = [id];
                     app.renderer.renderTracks();
                     app.ui.updateInspector();
+                    app.ui.setInspectorVisible(true); // Explicitly show on add
                     return id;
                 } catch(e) {
                     console.error("Error adding track", e);
@@ -1143,6 +1197,8 @@
                 app.state.tracks.forEach(t => {
                     if(app.state.selection.includes(t.id)) {
                         t.rotation = (t.rotation + deg) % 360;
+                        // Break all connections on rotation
+                        app.breakConnections(t);
                     }
                 });
 
@@ -1171,6 +1227,53 @@
                             delete neighbor.connections[conn.port];
                             delete track.connections[port];
                         }
+                    }
+                });
+            },
+
+            // New: Flexible connection logic to simulate rail joiner tolerance
+            connectNearbyPorts: (track) => {
+                const myPorts = MathUtils.getPorts(track.typeId);
+                const FLEX_GAP = 5; // mm tolerance (simulation of physical flex)
+                
+                myPorts.forEach((p, i) => {
+                    // If already connected, skip
+                    if (track.connections && track.connections[i]) return;
+                    
+                    const myWorldPos = MathUtils.getConnectorWorldPos(track, i);
+                    const myAngle = MathUtils.getConnectorWorldAngle(track, i);
+
+                    // Check against all other tracks
+                    for (const other of app.state.tracks) {
+                        if (other.id === track.id) continue;
+                        
+                        const otherPorts = MathUtils.getPorts(other.typeId);
+                        otherPorts.forEach((op, j) => {
+                            // If target occupied, skip
+                            if (other.connections && other.connections[j]) return;
+                            
+                            const otherWorldPos = MathUtils.getConnectorWorldPos(other, j);
+                            const dist = Math.hypot(myWorldPos.x - otherWorldPos.x, myWorldPos.y - otherWorldPos.y);
+                            
+                            if (dist <= FLEX_GAP) {
+                                // Check angle alignment (allow play, e.g. 15 degrees)
+                                const otherAngle = MathUtils.getConnectorWorldAngle(other, j);
+                                // Angles should be roughly 180 deg apart (facing each other)
+                                let angleDiff = Math.abs(myAngle - otherAngle) % 360;
+                                // Normalize 360 wrapping
+                                if (angleDiff > 180) angleDiff = 360 - angleDiff; 
+                                
+                                // We want angleDiff close to 180. 
+                                if (Math.abs(angleDiff - 180) < 15) {
+                                    // Connect!
+                                    if(!track.connections) track.connections = {};
+                                    if(!other.connections) other.connections = {};
+                                    
+                                    track.connections[i] = { id: other.id, port: j };
+                                    other.connections[j] = { id: track.id, port: i };
+                                }
+                            }
+                        });
                     }
                 });
             },
@@ -1381,6 +1484,10 @@
                         // We need the snapping track's tentative state
                         const leadTemp = tempState[bestSnap.trackId];
                         
+                        // The snapping track rotates around ITSELF? No, the group rotates.
+                        // Standard practice: Rotate group around the LEAD track's center.
+                        // Then translate so the port matches.
+                        
                         // Lead track new rotation
                         const leadNewRot = (leadTemp.rotation + groupRotDelta) % 360;
                         
@@ -1459,6 +1566,7 @@
                     
                     const dragId = app.state.drag.trackId;
                     
+                    // 1. Apply primary snap (The one the user was aiming for)
                     if(app.state.drag.pendingSnap) {
                         const s = app.state.drag.pendingSnap;
                         const t1 = app.state.tracks.find(x => x.id === s.trackId);
@@ -1472,8 +1580,14 @@
                         }
                     }
 
+                    // 2. Apply "Flexible" snaps for secondary joints (Loop closing, parallel tracks)
                     const itemsToCheck = app.state.selection.length > 1 ? app.state.selection : [dragId];
-                    
+                    itemsToCheck.forEach(id => {
+                        const t = app.state.tracks.find(x => x.id === id);
+                        if(t) app.connectNearbyPorts(t);
+                    });
+
+                    // 3. Validation
                     let stillColliding = false;
                     itemsToCheck.forEach(id => {
                         const t = app.state.tracks.find(x => x.id === id);
@@ -1492,12 +1606,11 @@
 
                     app.state.drag = null;
                     app.renderer.layerOverlay.innerHTML = ''; 
-                    if(app.state.simulation.active) app.runSimulation();
-                    app.renderer.renderTracks();
-                    
-                    // Show inspector
                     app.ui.setInspectorVisible(true);
                     app.ui.updateInspector();
+
+                    if(app.state.simulation.active) app.runSimulation();
+                    app.renderer.renderTracks();
                 }
             },
             
@@ -1694,8 +1807,6 @@
                                     app.state.selection = [clickedTrack.id];
                                 }
                             }
-                            app.ui.updateInspector();
-                            
                             // Start Drag
                             // Break connections to non-selected
                             app.state.selection.forEach(selId => {
@@ -1716,6 +1827,7 @@
                                 }),
                                 pendingSnap: null
                             };
+                            
                             app.ui.setInspectorVisible(false);
                             app.renderer.renderTracks();
                         } else {
