@@ -99,6 +99,17 @@
             pointer-events: none;
         }
 
+        /* AI Modal Styles */
+        .ai-typing::after {
+            content: '...';
+            animation: ellipsis 1.5s infinite;
+        }
+        @keyframes ellipsis {
+            0% { content: '.'; }
+            33% { content: '..'; }
+            66% { content: '...'; }
+        }
+
         /* Print Styles */
         @media print {
             body { 
@@ -107,7 +118,7 @@
                 -webkit-print-color-adjust: exact;
                 print-color-adjust: exact;
             }
-            header, aside, .zoom-controls, #toast, #sim-legend, #rotate-tip { display: none !important; }
+            header, aside, .zoom-controls, #toast, #sim-legend, #rotate-tip, #ai-modal { display: none !important; }
             
             #canvas-container { 
                 background-color: white !important; 
@@ -465,6 +476,7 @@
                  const sagitta = radius * (1 - Math.cos(h_angle));
                  
                  // Align visual center: shift Y so chord is centered on Y=0 (locally)
+                 // This minimizes the bounding box size
                  const yOff = sagitta / 2;
                  
                  // 1. Define Unrotated Symmetric Geometry (Chord horizontal)
@@ -563,10 +575,15 @@
                     points.push(geo.p0);
                     points.push(geo.p1);
                     points.push(geo.peak);
+                    
+                    // Add thickness points manually if needed, or just rely on hit test margin
+                    // Let's broaden the bounds by W/2 in all directions in the final min/max check
                 } else if (def.type === 'turnout') {
                      const ports = MathUtils.getPorts(typeId, 0); 
                      ports.forEach(p => points.push({x: p.x, y: p.y}));
+                     // Add Branch peak approx
                      const r = def.radius;
+                     // ... Turnout bounds are tricky without full geo, stick to ports which define the hull
                 }
 
                 let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -591,10 +608,37 @@
                 if (def.type === 'straight' || def.type === 'buffer') {
                     segments.push({ p1: toWorld({x: -def.length/2, y: 0}), p2: toWorld({x: def.length/2, y: 0}) });
                 } else if (def.type === 'curve') {
-                    // 2-segment approximation using the corrected peak
+                    // 20-segment approximation using polyline
                     const geo = MathUtils.calculateCurveGeometry(def.radius, def.angle);
-                    segments.push({ p1: toWorld(geo.p0), p2: toWorld(geo.peak) });
-                    segments.push({ p1: toWorld(geo.peak), p2: toWorld(geo.p1) });
+                    const steps = Math.ceil(def.angle / 5);
+                    const c = geo.localCenter;
+                    
+                    // Center in local space is at `geo.localCenter`.
+                    // Angles: P0 is at 180 deg from center? No.
+                    // Let's use the local center we derived in pathTrackCenter
+                    // Arc goes from startA to endA.
+                    // StartA angle from center:
+                    const startA = Math.atan2(geo.p0.y - c.y, geo.p0.x - c.x);
+                    const endA = Math.atan2(geo.p1.y - c.y, geo.p1.x - c.x);
+                    
+                    // Ensure logic direction
+                    // If clockwise or not? 
+                    // P0 (180) to P1 (Angle) relative to visual rotation?
+                    // Let's sweep.
+                    let diff = endA - startA;
+                    while (diff <= -Math.PI) diff += 2*Math.PI;
+                    while (diff > Math.PI) diff -= 2*Math.PI;
+                    
+                    for(let i=0; i<steps; i++) {
+                        const t1 = startA + (diff * (i/steps));
+                        const t2 = startA + (diff * ((i+1)/steps));
+                        
+                        const p1_local = { x: c.x + def.radius * Math.cos(t1), y: c.y + def.radius * Math.sin(t1) };
+                        const p2_local = { x: c.x + def.radius * Math.cos(t2), y: c.y + def.radius * Math.sin(t2) };
+                        
+                        segments.push({ p1: toWorld(p1_local), p2: toWorld(p2_local) });
+                    }
+                    
                 } else if (def.type === 'turnout') {
                     segments.push({ p1: toWorld({x: -def.length/2, y: 0}), p2: toWorld({x: def.length/2, y: 0}) });
                     const ports = MathUtils.getPorts(track.typeId);
@@ -906,10 +950,11 @@
                     ctx.rotate(track.rotation * Math.PI / 180);
 
                     // Styles
-                    let railColor = isPrint ? '#000000' : (isCollision ? '#ef4444' : '#e0f2fe');
-                    const sleeperColor = isPrint ? '#94a3b8' : (isCollision ? 'rgba(239, 68, 68, 0.3)' : 'rgba(255, 255, 255, 0.15)');
+                    let railColor = isPrint ? '#000000' : (isCollision ? '#ef4444' : '#d1d5db'); // Light Grey Steel
+                    let railHeadColor = isPrint ? null : '#e5e7eb'; // Silver top
+                    const sleeperColor = isPrint ? '#94a3b8' : (isCollision ? 'rgba(239, 68, 68, 0.3)' : '#574638'); // Brownish wood
                     const highlightColor = isCollision ? 'rgba(239, 68, 68, 0.1)' : 'rgba(56, 189, 248, 0.3)';
-                    const fixedRailWidth = 1.5;
+                    const fixedRailWidth = 2.0;
 
                     // Simulation Color Override
                     if (app.state.simulation.active && !isPrint && !isCollision) {
@@ -920,6 +965,7 @@
                         } else {
                             railColor = '#f87171'; // Disconnected / Error
                         }
+                        railHeadColor = railColor;
                     }
 
                     // Highlight / Selection Halo
@@ -931,27 +977,46 @@
                         ctx.stroke();
                     }
 
-                    // Sleepers
-                    ctx.strokeStyle = sleeperColor;
-                    ctx.lineWidth = 24;
-                    ctx.setLineDash([3, 5]); // 3mm sleeper, 5mm gap
-                    app.renderer.pathTrackCenter(ctx, def);
-                    ctx.stroke();
-                    ctx.setLineDash([]); // Reset dash
+                    // 1. Ballast Bed (Under sleepers)
+                    if (!isPrint) {
+                        ctx.strokeStyle = '#383636'; // Dark grey ballast
+                        ctx.lineWidth = 30;
+                        ctx.lineCap = 'butt';
+                        app.renderer.pathTrackCenter(ctx, def);
+                        ctx.stroke();
+                        // Noise/Texture could go here
+                    }
 
-                    // Rails (Left & Right)
+                    // 2. Sleepers (Individual Rectangles)
+                    // We need to iterate along the path to draw rects
+                    ctx.fillStyle = sleeperColor;
+                    const sleeperSpacing = 6; // approx 4mm real scale -> 6px on screen
+                    const sleeperW = 24; 
+                    const sleeperH = 4;
+
+                    // Helper to draw sleepers along path
+                    app.renderer.drawSleepers(ctx, def, sleeperSpacing, sleeperW, sleeperH);
+
+                    // 3. Rails (Left & Right)
+                    // Base Rail (Darker)
+                    ctx.strokeStyle = '#1f2937'; // Dark steel base
+                    ctx.lineWidth = fixedRailWidth + 1;
+                    ctx.beginPath(); app.renderer.pathTrackOffset(ctx, def, -GAUGE); ctx.stroke();
+                    ctx.beginPath(); app.renderer.pathTrackOffset(ctx, def, GAUGE); ctx.stroke();
+
+                    // Rail Head (Lighter top)
                     ctx.strokeStyle = railColor;
                     ctx.lineWidth = fixedRailWidth;
+                    ctx.beginPath(); app.renderer.pathTrackOffset(ctx, def, -GAUGE); ctx.stroke();
+                    ctx.beginPath(); app.renderer.pathTrackOffset(ctx, def, GAUGE); ctx.stroke();
                     
-                    // Left Rail (-offset)
-                    ctx.beginPath();
-                    app.renderer.pathTrackOffset(ctx, def, -GAUGE);
-                    ctx.stroke();
-                    
-                    // Right Rail (+offset)
-                    ctx.beginPath();
-                    app.renderer.pathTrackOffset(ctx, def, GAUGE);
-                    ctx.stroke();
+                    // Turnout Details (Check Rails, Frog)
+                    if (def.type === 'turnout' && !isPrint) {
+                         // Draw Check Rails (simplified)
+                         ctx.lineWidth = 1.5;
+                         ctx.strokeStyle = '#333';
+                         // TODO: Calculate check rail positions accurately
+                    }
 
                     // Buffer Stop Visuals
                     if (def.type === 'buffer') {
@@ -1035,6 +1100,84 @@
 
                     ctx.restore();
                 },
+                
+                // Helper to draw sleepers along the path
+                drawSleepers: (ctx, def, spacing, w, h) => {
+                    // Straight
+                    if(def.type === 'straight' || def.type === 'buffer') {
+                        const len = def.length;
+                        const count = Math.floor(len / spacing);
+                        const startX = -len/2 + spacing/2;
+                        
+                        for(let i=0; i<count; i++) {
+                            const x = startX + i*spacing;
+                            ctx.fillRect(x - h/2, -w/2, h, w);
+                        }
+                    }
+                    // Curve
+                    else if (def.type === 'curve') {
+                        const geo = MathUtils.calculateCurveGeometry(def.radius, def.angle);
+                        const c = geo.localCenter;
+                        const radStart = Math.atan2(geo.p0.y - c.y, geo.p0.x - c.x);
+                        const radEnd = Math.atan2(geo.p1.y - c.y, geo.p1.x - c.x);
+                        
+                        // Calculate arc length
+                        let totalAngle = radEnd - radStart;
+                        // Normalize
+                        while (totalAngle <= -Math.PI) totalAngle += 2*Math.PI;
+                        while (totalAngle > Math.PI) totalAngle -= 2*Math.PI;
+                        
+                        const arcLen = Math.abs(totalAngle) * def.radius;
+                        const count = Math.floor(arcLen / spacing);
+                        const angleStep = totalAngle / count;
+                        
+                        for(let i=0; i<=count; i++) {
+                            const angle = radStart + i*angleStep;
+                            
+                            ctx.save();
+                            ctx.translate(c.x + Math.cos(angle)*def.radius, c.y + Math.sin(angle)*def.radius);
+                            ctx.rotate(angle + Math.PI/2); // Perpendicular to radius
+                            ctx.fillRect(-w/2, -h/2, w, h);
+                            ctx.restore();
+                        }
+                    }
+                    // Turnout (Simplified sleeper logic - draws main and branch sleepers)
+                    else if (def.type === 'turnout') {
+                         // Straight part
+                         const len = def.length;
+                         const count = Math.floor(len / spacing);
+                         const startX = -len/2 + spacing/2;
+                         for(let i=0; i<count; i++) {
+                            const x = startX + i*spacing;
+                            // Extend sleepers near frog? Keep simple for now
+                            ctx.fillRect(x - h/2, -w/2, h, w);
+                         }
+                         
+                         // Branch part (Approximate sleepers along arc)
+                         const dir = def.direction;
+                         const rad = Math.abs(def.angle) * Math.PI / 180;
+                         const cx = -def.length / 2;
+                         const cy = (dir === 'left' ? -1 : 1) * def.radius;
+                         const startAngle = (dir === 'left' ? 0.5 : -0.5) * Math.PI;
+                         const endAngle = startAngle + (dir === 'left' ? -rad : rad);
+                         
+                         const arcLen = rad * def.radius;
+                         const bCount = Math.floor(arcLen / spacing);
+                         const bStep = (endAngle - startAngle) / bCount;
+                         
+                         for(let i=0; i<=bCount; i++) {
+                            // Don't draw if overlapping with straight too much (at start)
+                            if(i < 5) continue; 
+                            
+                            const angle = startAngle + i*bStep;
+                            ctx.save();
+                            ctx.translate(cx + Math.cos(angle)*def.radius, cy + Math.sin(angle)*def.radius);
+                            ctx.rotate(angle + (dir==='left'?-1:1)*Math.PI/2); // Tangent
+                            ctx.fillRect(-h/2, -w/2, h, w);
+                            ctx.restore();
+                         }
+                    }
+                },
 
                 pathTrackCenter: (ctx, def) => {
                     ctx.beginPath();
@@ -1115,7 +1258,7 @@
                 }
             },
             
-            // --- ACTIONS ---
+            // ... (rest of actions)
             updateBoardSize: () => {
                 const w = parseFloat(document.getElementById('board-w').value) || 2440;
                 const h = parseFloat(document.getElementById('board-h').value) || 1220;
@@ -1484,10 +1627,6 @@
                         // We need the snapping track's tentative state
                         const leadTemp = tempState[bestSnap.trackId];
                         
-                        // The snapping track rotates around ITSELF? No, the group rotates.
-                        // Standard practice: Rotate group around the LEAD track's center.
-                        // Then translate so the port matches.
-                        
                         // Lead track new rotation
                         const leadNewRot = (leadTemp.rotation + groupRotDelta) % 360;
                         
@@ -1807,6 +1946,8 @@
                                     app.state.selection = [clickedTrack.id];
                                 }
                             }
+                            app.ui.updateInspector();
+                            
                             // Start Drag
                             // Break connections to non-selected
                             app.state.selection.forEach(selId => {
@@ -1856,3 +1997,4 @@
     </script>
 </body>
 </html>
+```
