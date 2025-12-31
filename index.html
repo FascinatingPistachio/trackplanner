@@ -287,11 +287,14 @@
 
         <!-- Simulation Legend -->
         <div id="sim-legend" class="absolute top-4 left-4 sm:left-auto sm:right-[300px] glass px-4 py-2 rounded border border-white/10 hidden z-30">
-            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Voltage Drop</div>
-            <div class="flex items-center gap-4 text-xs font-mono">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Voltage & Physics</div>
+            <div class="flex items-center gap-4 text-xs font-mono mb-2">
                 <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)]"></span> 12V</div>
                 <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-yellow-400"></span> 9V</div>
                 <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-400"></span> &lt;6V</div>
+            </div>
+            <div id="sim-circuit-status" class="text-[10px] text-slate-300 border-t border-white/10 pt-2 flex items-center gap-2">
+                <i data-lucide="activity" class="w-3 h-3 text-slate-500"></i> Scanning...
             </div>
         </div>
 
@@ -413,7 +416,7 @@
                  
                  // Align visual center: shift Y so chord is centered on Y=0 (locally)
                  // This minimizes the bounding box size
-                 const yOff = -sagitta / 2;
+                 const yOff = sagitta / 2;
                  
                  // 1. Define Unrotated Symmetric Geometry (Chord horizontal)
                  // Curve bulges UP (Negative Y). Center is DOWN (Positive Y).
@@ -499,7 +502,7 @@
             getRotatedBounds: (typeId, rotation) => {
                 const def = TRACK_LIBRARY[typeId];
                 let points = [];
-                const W = 40; // Increased width for easier hit testing
+                const W = 30; 
 
                 if (def.type === 'straight' || def.type === 'buffer') {
                     points = [{x: -def.length/2, y: -W/2}, {x: def.length/2, y: -W/2}, {x: -def.length/2, y: W/2}, {x: def.length/2, y: W/2}];
@@ -578,7 +581,7 @@
             checkPointInTrack: (px, py, track) => {
                 const local = MathUtils.rotatePoint(px - track.x, py - track.y, -track.rotation);
                 const bounds = MathUtils.getRotatedBounds(track.typeId, 0); 
-                const margin = 10; // Generous margin for easy selection
+                const margin = 5;
                 return (local.x >= bounds.minX - margin && local.x <= bounds.maxX + margin &&
                         local.y >= bounds.minY - margin && local.y <= bounds.maxY + margin);
             }
@@ -959,7 +962,6 @@
                         const startA = Math.atan2(geo.p0.y - c.y, geo.p0.x - c.x);
                         const endA = Math.atan2(geo.p1.y - c.y, geo.p1.x - c.x);
                         
-                        // Ensure shortest path arc
                         let anticlockwise = false;
                         let diff = endA - startA;
                         while (diff <= -Math.PI) diff += 2*Math.PI;
@@ -973,11 +975,32 @@
                         ctx.lineTo(def.length/2, 0);
                         
                         // Branch part
+                        // Corrected Geometry:
+                        // Left Turnout: Curves Up (-Y). Center is at (ToeX, -R). Start Angle PI/2. End Angle PI/2 - Angle.
+                        // Right Turnout: Curves Down (+Y). Center is at (ToeX, +R). Start Angle -PI/2. End Angle -PI/2 + Angle.
+                        
                         const dir = def.direction;
                         const rad = Math.abs(def.angle) * Math.PI / 180;
                         const cx = -def.length / 2;
-                        const cy = (dir === 'left' ? 1 : -1) * def.radius;
-                        const startAngle = (dir === 'left' ? -0.5 : 0.5) * Math.PI;
+                        
+                        // Center Y
+                        // Left (-Y curve) -> Center is at -R? 
+                        // Wait, Center at -R -> Top of circle (0, -R). Bottom (0,0).
+                        // If center is (0, -R), bottom is (0, -R+R) = (0,0).
+                        // Angle from center to (0,0) is PI/2.
+                        // To curve Up/Left (decreasing Y, increasing X), we go clockwise? No.
+                        // Center (-R). Point (0). To get negative Y, we need y = -R + R sin(t).
+                        // If t decreases from PI/2... sin decreases. y becomes negative (Up). Correct.
+                        // So Left: Center -R. Start PI/2. End PI/2 - rad. Anticlockwise = true.
+                        
+                        // Right (+Y curve): Center +R. Top is (0,0).
+                        // Angle from center to (0,0) is -PI/2.
+                        // To get positive Y, we need y = R + R sin(t).
+                        // If t increases from -PI/2... sin increases. y becomes positive (Down). Correct.
+                        // So Right: Center +R. Start -PI/2. End -PI/2 + rad. Anticlockwise = false.
+
+                        const cy = (dir === 'left' ? -1 : 1) * def.radius;
+                        const startAngle = (dir === 'left' ? 0.5 : -0.5) * Math.PI;
                         const endAngle = startAngle + (dir === 'left' ? -rad : rad);
                         const anticlockwise = (dir === 'left');
                         
@@ -1012,12 +1035,26 @@
                          const dir = def.direction;
                          const rad = Math.abs(def.angle) * Math.PI / 180;
                          const cx = -def.length / 2;
-                         const cy = (dir === 'left' ? 1 : -1) * def.radius;
-                         const startAngle = (dir === 'left' ? -0.5 : 0.5) * Math.PI;
+                         
+                         const cy = (dir === 'left' ? -1 : 1) * def.radius;
+                         const startAngle = (dir === 'left' ? 0.5 : -0.5) * Math.PI;
                          const endAngle = startAngle + (dir === 'left' ? -rad : rad);
                          const anticlockwise = (dir === 'left');
                          
-                         const r_eff = def.radius + (dir === 'left' ? -offset : offset);
+                         // Radius Offset Logic:
+                         // Left (Center -R): 
+                         // Rail Y < 0. Closer to center is "Higher" (more negative Y).
+                         // Inner Rail (offset -G) is "Up". Distance to center |-R - (-G)| = |-R+G| = R-G.
+                         // Outer Rail (offset +G) is "Down". Distance |-R - G| = R+G.
+                         // So Left: R + offset.
+                         
+                         // Right (Center +R):
+                         // Rail Y > 0.
+                         // Inner Rail (offset +G) is "Down". Distance |R - G| = R-G.
+                         // Outer Rail (offset -G) is "Up". Distance |R - (-G)| = R+G.
+                         // So Right: R - offset.
+                         
+                         const r_eff = def.radius + (dir === 'left' ? offset : -offset);
                          
                          ctx.moveTo(-def.length/2, offset); 
                          ctx.arc(cx, cy, r_eff, startAngle, endAngle, anticlockwise);
@@ -1187,7 +1224,7 @@
                 }
                 return null;
             },
-            
+
             handleTrackMouseDown: (e, id) => { /* Replaced by global handler */ },
 
             checkCollision: (track, ignoreList = []) => {
@@ -1298,7 +1335,8 @@
                                 const otherPorts = MathUtils.getPorts(other.typeId);
                                 for(let j=0; j<otherPorts.length; j++) {
                                     // Ignore if occupied
-                                    if(other.connections && other.connections[j]) return;
+                                    // FIX: Use 'continue' instead of 'return' to keep checking other ports on this track!
+                                    if(other.connections && other.connections[j]) continue;
                                     
                                     const pOther = MathUtils.getConnectorWorldPos(other, j);
                                     const dist = Math.hypot(myPortPos.x - pOther.x, myPortPos.y - pOther.y);
@@ -1342,10 +1380,6 @@
                         // Calculate where the SNAP PORT ends up after simple rotation of the group
                         // We need the snapping track's tentative state
                         const leadTemp = tempState[bestSnap.trackId];
-                        
-                        // The snapping track rotates around ITSELF? No, the group rotates.
-                        // Standard practice: Rotate group around the LEAD track's center.
-                        // Then translate so the port matches.
                         
                         // Lead track new rotation
                         const leadNewRot = (leadTemp.rotation + groupRotDelta) % 360;
@@ -1484,6 +1518,8 @@
                 app.state.simulation.active = !app.state.simulation.active;
                 const btn = document.getElementById('btn-sim');
                 const leg = document.getElementById('sim-legend');
+                const statusEl = document.getElementById('sim-circuit-status');
+                
                 if (app.state.simulation.active) {
                     btn.classList.add('bg-white/10', 'text-sky-400', 'border-sky-500/50');
                     leg.classList.remove('hidden');
@@ -1493,11 +1529,14 @@
                     leg.classList.add('hidden');
                     app.state.tracks.forEach(t => delete t.simVoltage);
                     app.renderer.renderTracks();
+                    if(statusEl) statusEl.innerHTML = '';
                 }
             },
 
             runSimulation: () => {
-                const graph = {}; app.state.tracks.forEach(t => graph[t.id] = []);
+                const graph = {}; 
+                app.state.tracks.forEach(t => graph[t.id] = []);
+                
                 app.state.tracks.forEach(t => {
                     if(t.connections) {
                         Object.values(t.connections).forEach(conn => {
@@ -1507,18 +1546,68 @@
                     }
                 });
 
+                // Reset
                 app.state.tracks.forEach(t => t.simVoltage = 0);
+                
+                // BFS for Power
                 const queue = [];
-                app.state.tracks.filter(t => t.powerSource).forEach(t => { t.simVoltage = 12; queue.push({ id: t.id, v: 12 }); });
+                const sources = app.state.tracks.filter(t => t.powerSource);
+                
+                sources.forEach(t => { t.simVoltage = 12; queue.push({ id: t.id, v: 12 }); });
+                
                 const visited = new Set();
+                const parents = {}; // For cycle detection
+                let circuitClosed = false;
+
+                // Standard BFS
                 while(queue.length > 0) {
                     const curr = queue.shift();
-                    if(visited.has(curr.id)) { const t = app.state.tracks.find(x => x.id === curr.id); if(t.simVoltage < curr.v) t.simVoltage = curr.v; else continue; }
+                    const t = app.state.tracks.find(x => x.id === curr.id);
+                    
+                    if(visited.has(curr.id)) {
+                        // Already visited via a different path?
+                        if(t.simVoltage < curr.v) {
+                            t.simVoltage = curr.v; // Update better voltage path
+                        } else {
+                            continue;
+                        }
+                    }
+                    
                     visited.add(curr.id);
-                    const t = app.state.tracks.find(x => x.id === curr.id); t.simVoltage = curr.v;
-                    const drop = 0.5; const nextV = Math.max(0, curr.v - drop);
-                    if(graph[curr.id]) { graph[curr.id].forEach(nid => { queue.push({ id: nid, v: nextV }); }); }
+                    t.simVoltage = curr.v;
+                    
+                    const drop = 0.5; 
+                    const nextV = Math.max(0, curr.v - drop);
+                    
+                    if(graph[curr.id]) { 
+                        graph[curr.id].forEach(nid => { 
+                            // Cycle Detection Logic (DFS-style check during BFS traversal)
+                            if (visited.has(nid) && parents[curr.id] !== nid) {
+                                // We hit a visited node that isn't our immediate parent -> Loop!
+                                // Note: In general graph, multiple paths mean loop.
+                                circuitClosed = true;
+                            }
+                            if (!visited.has(nid)) {
+                                parents[nid] = curr.id;
+                                queue.push({ id: nid, v: nextV });
+                            }
+                        }); 
+                    }
                 }
+                
+                // Update Status UI
+                const statusEl = document.getElementById('sim-circuit-status');
+                if (statusEl) {
+                    if (sources.length === 0) {
+                        statusEl.innerHTML = '<i data-lucide="alert-triangle" class="w-3 h-3 text-red-400"></i> No Power Source';
+                    } else if (circuitClosed) {
+                        statusEl.innerHTML = '<i data-lucide="check-circle" class="w-3 h-3 text-green-400"></i> Status: Circuit Complete';
+                    } else {
+                        statusEl.innerHTML = '<i data-lucide="git-branch" class="w-3 h-3 text-yellow-400"></i> Status: Point-to-Point / Gap';
+                    }
+                    lucide.createIcons();
+                }
+
                 app.renderer.renderTracks();
             },
 
